@@ -28,17 +28,29 @@ jobs:
           elixir-version: ${{matrix.elixir}} # Define the elixir version [required]
           otp-version: ${{matrix.otp}} # Define the OTP version [required]
 
-      - uses: actions/cache@v1
+      - uses: actions/cache@v4
         id: deps-cache
         with:
-          path: deps
-          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          path: |
+            deps
+            flame_k8s/deps
+            flame_k8s_controller/deps
+            flame_example/deps
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
 
-      - uses: actions/cache@v1
+      - uses: actions/cache@v4
         id: build-cache
         with:
-          path: _build
-          key: ${{ runner.os }}-build-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles(format('{0}{1}', github.workspace, '/mix.lock')) }}
+          path: |
+            _build
+            flame_k8s/_build
+            flame_k8s_controller/_build
+            flame_example/_build
+          key: ${{ runner.os }}-build-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: start minikube
         id: minikube
@@ -47,18 +59,41 @@ jobs:
       - name: Test cluster !
         run: kubectl get pods -A
 
-      - name: Install dependencies
+      - name: Install dependencies and compile flame_k8s
         run: |
-          mix deps.clean --all
+          cd flame_k8s
           mix deps.get
+          mix compile
+          cd ..
 
-      - name: Run tests spawn
-        run: |
-          MIX_ENV=test elixir -S mix test
-
-      - name: Run tests spawn_statestores
+      - name: Install dependencies and compile flame_k8s_controller
         run: |
           cd flame_k8s_controller
           mix deps.get
-          MIX_ENV=test elixir --name flame_k8s_controller@127.0.0.1 -S mix test
-          cd ../../
+          mix compile
+          cd ..
+
+      - name: Install dependencies and compile flame_example
+        run: |
+          cd flame_example
+          mix deps.get
+          mix compile
+          cd ..
+
+      - name: Run tests flame_k8s
+        run: |
+          cd flame_k8s
+          MIX_ENV=test mix test
+          cd ..
+
+      - name: Run tests flame_k8s_controller
+        run: |
+          cd flame_k8s_controller
+          MIX_ENV=test mix test
+          cd ..
+
+      - name: Run tests flame_example
+        run: |
+          cd flame_example
+          MIX_ENV=test mix test
+          cd ..
