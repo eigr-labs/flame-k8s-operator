@@ -14,17 +14,16 @@ defmodule FLAME.K8s.MixProject do
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:flame, "~> 0.5.0"},
+      {:flame, "~> 0.4.0 or ~> 0.5.0"},
+      {:k8s, "~> 2.8"},
       {:req, "~> 0.5.0"}
     ]
   end

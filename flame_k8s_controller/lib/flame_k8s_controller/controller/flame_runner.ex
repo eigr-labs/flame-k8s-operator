@@ -5,6 +5,7 @@ defmodule FlameK8sController.Controller.FlameRunner do
   step(Bonny.Pluggable.SkipObservedGenerations)
   step(FlameK8sController.Handler.FlameRunnerHandler)
 
+  @impl true
   def rbac_rules() do
     [
       to_rbac_rule({"rbac.authorization.k8s.io", ["role", "roles", "rolebindings"], "*"}),

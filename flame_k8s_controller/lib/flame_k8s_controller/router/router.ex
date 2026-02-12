@@ -1,4 +1,11 @@
 defmodule FlameK8sController.Router do
+  @moduledoc """
+  HTTP router for the flame-k8s-controller.
+
+  Provides:
+  - Health check endpoints
+  - Admission webhook endpoints for mutating Deployments/StatefulSets
+  """
   use Plug.Router
 
   plug(Plug.Logger)
@@ -6,7 +13,6 @@ defmodule FlameK8sController.Router do
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
   plug(:dispatch)
 
-  forward("/api", to: FlameK8sController.Routes.Api)
   forward("/health", to: FlameK8sController.Routes.Health)
 
   post("/admission-review/mutating",

@@ -1,22 +1,26 @@
 defmodule FlameK8sController.Routes.Api do
-  @moduledoc false
+  @moduledoc """
+  API routes for the Flame K8s Controller.
+
+  Note: Most functionality is now handled via CRDs and the Bonny operator.
+  These routes are kept for potential future extensions or monitoring.
+  """
   use FlameK8sController.Routes.Base
 
-  post "/v1/runners/:namespace/:name", do: &handle_create_runner_pod/1
-
-  delete "/v1/runners/:namespace/:name", do: &handle_delete_runner_pod/1
+  get "/" do
+    send!(
+      conn,
+      200,
+      %{
+        status: "ok",
+        message: "Flame K8s Controller API",
+        version: "v1"
+      },
+      "application/json"
+    )
+  end
 
   match _ do
     send_resp(conn, 404, "Not found!")
-  end
-
-  defp handle_create_runner_pod(conn) do
-    name = conn.params["name"]
-    namespace = conn.params["namespace"]
-  end
-
-  defp handle_delete_runner_pod(conn) do
-    name = conn.params["name"]
-    namespace = conn.params["namespace"]
   end
 end

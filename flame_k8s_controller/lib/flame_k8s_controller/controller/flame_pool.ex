@@ -5,6 +5,7 @@ defmodule FlameK8sController.Controller.FlamePool do
   step(Bonny.Pluggable.SkipObservedGenerations)
   step(FlameK8sController.Handler.FlamePoolHandler)
 
+  @impl true
   def rbac_rules() do
     [
       to_rbac_rule({"", "secrets", "*"}),

@@ -47,14 +47,14 @@ defmodule FlameK8sController.Operator do
       Bonny.API.CRD.new!(
         names:
           Bonny.API.CRD.kind_to_names("FlamePool", [
-            "framepool",
-            "framepools",
+            "flamepool",
+            "flamepools",
             "pool",
             "pools"
           ]),
         group: "flame.org",
         scope: :Namespaced,
-        versions: [FlameK8sController.Versions.Api.V1.FlameRunner]
+        versions: [FlameK8sController.Versions.Api.V1.FlamePool]
       )
     ]
   end
