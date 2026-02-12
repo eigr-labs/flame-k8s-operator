@@ -9,23 +9,25 @@ on:
 jobs:
   build:
     name: Build and Test OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        otp: [26.1.x]
-        elixir: [1.15.x]
+        otp: ['26.2']
+        elixir: ['1.16']
 
     env:
       MIX_ENV: test
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{matrix.elixir}} # Define the elixir version [required]
-          otp-version: ${{matrix.otp}} # Define the OTP version [required]
+          elixir-version: ${{matrix.elixir}}
+          otp-version: ${{matrix.otp}}
+          install-rebar: true
+          install-hex: true
 
       - uses: actions/cache@v4
         id: deps-cache
