@@ -26,7 +26,6 @@ defmodule FlameExample.MixProject do
     [
       {:bakeware, ">= 0.0.0", runtime: false},
       {:bandit, "~> 1.1"},
-      {:flame, "~> 0.1.6"},
       {:flame_k8s, path: "../flame_k8s"}
     ]
   end
