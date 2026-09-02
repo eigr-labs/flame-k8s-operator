@@ -1,0 +1,24 @@
+apiVersion: flame.org/v1
+kind: FlamePool
+metadata:
+  name: cpu-balanced
+  namespace: flame
+spec:
+  podTemplate:
+    metadata:
+      labels:
+        workload-profile: cpu-balanced
+    spec:
+      containers:
+        - name: runner
+          env:
+            - name: MIX_ENV
+              value: prod
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Never

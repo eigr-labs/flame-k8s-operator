@@ -11,7 +11,7 @@ defmodule FlameK8sController.Operator do
 
   step(Bonny.Pluggable.Logger, level: :info)
   step(:delegate_to_controller)
-  step(Bonny.Pluggable.ApplyStatus)
+  step(Bonny.Pluggable.ApplyStatus, safe_mode: true)
   step(Bonny.Pluggable.ApplyDescendants)
 
   @impl Bonny.Operator

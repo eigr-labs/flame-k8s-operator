@@ -11,25 +11,111 @@ spec:
     kind: FlamePool
     plural: flamepools
     shortNames:
-      - framepool
-      - framepools
+      - flamepool
+      - flamepools
       - pool
       - pools
     singular: flamepool
   scope: Namespaced
   versions:
-    - deprecationWarning:
+    - additionalPrinterColumns:
+        - description: Current semantic validation phase
+          jsonPath: .status.phase
+          name: Phase
+          type: string
+        - description: Age of the FlamePool
+          jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      deprecationWarning:
       name: v1
       schema:
         openAPIV3Schema:
           properties:
-            status:
+            spec:
+              description: Specification of the FlamePool configuration
               properties:
+                podTemplate:
+                  description: Pod template specification for FLAME runners. This follows the standard Kubernetes Pod template structure.
+                  properties:
+                    metadata:
+                      description: Metadata to apply to runner pods
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          description: Annotations to apply to runner pods
+                          type: object
+                        labels:
+                          additionalProperties:
+                            type: string
+                          description: Labels to apply to runner pods
+                          type: object
+                      type: object
+                    spec:
+                      description: Pod specification for runner pods. Follows Kubernetes Pod spec structure.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                    - spec
+                  type: object
+              required:
+                - podTemplate
+              type: object
+            status:
+              description: Status of the FlamePool
+              properties:
+                conditions:
+                  description: Current conditions of the FlamePool
+                  items:
+                    properties:
+                      lastTransitionTime:
+                        description: Last time the condition transitioned
+                        format: date-time
+                        type: string
+                      message:
+                        description: Human-readable message about the condition
+                        type: string
+                      reason:
+                        description: Machine-readable reason for the condition
+                        type: string
+                      status:
+                        description: Status of the condition
+                        enum:
+                          - 'True'
+                          - 'False'
+                          - Unknown
+                        type: string
+                      type:
+                        description: Type of condition (e.g., Ready, Valid)
+                        type: string
+                    required:
+                      - type
+                      - status
+                    type: object
+                  type: array
+                lastUpdateTime:
+                  description: Last time the status was updated by the controller
+                  format: date-time
+                  type: string
+                message:
+                  description: Human-readable message about the current phase
+                  type: string
                 observedGeneration:
                   type: integer
+                phase:
+                  description: Overall semantic validation phase for the FlamePool
+                  enum:
+                    - Ready
+                    - Invalid
+                  type: string
+                reason:
+                  description: Machine-readable reason for the current phase
+                  type: string
               type: object
+          required:
+            - spec
           type: object
-          x-kubernetes-preserve-unknown-fields: true
       served: true
       storage: true
       subresources:

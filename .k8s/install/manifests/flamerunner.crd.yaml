@@ -19,18 +19,177 @@ spec:
     singular: flamerunner
   scope: Namespaced
   versions:
-    - deprecationWarning:
+    - additionalPrinterColumns:
+        - description: Current phase of the runner
+          jsonPath: .status.phase
+          name: Phase
+          type: string
+        - description: FlamePool used for configuration
+          jsonPath: .spec.poolRef
+          name: Pool
+          type: string
+        - description: Name of the runner pod
+          jsonPath: .status.podName
+          name: Pod
+          type: string
+        - description: Consecutive pod lookup retries
+          jsonPath: .status.retryCount
+          name: Retries
+          type: integer
+        - description: Age of the FlameRunner
+          jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      deprecationWarning:
       name: v1
       schema:
         openAPIV3Schema:
           properties:
-            status:
+            spec:
+              description: Specification of the FlameRunner
               properties:
+                env:
+                  description: Additional environment variables for the runner
+                  items:
+                    properties:
+                      name:
+                        type: string
+                      value:
+                        type: string
+                      valueFrom:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                    required:
+                      - name
+                    type: object
+                  type: array
+                image:
+                  description: Container image to use for the runner pod
+                  minLength: 1
+                  type: string
+                parentRef:
+                  description: Reference to the parent application that spawned this runner
+                  properties:
+                    name:
+                      description: Name of the parent pod
+                      type: string
+                    namespace:
+                      description: Namespace of the parent pod
+                      type: string
+                    uid:
+                      description: UID of the parent pod for ownership tracking
+                      type: string
+                  required:
+                    - name
+                    - namespace
+                  type: object
+                poolRef:
+                  default: default-pool
+                  description: "Reference to a FlamePool for configuration template. If not specified, uses 'default-pool'"
+                  type: string
+                resources:
+                  description: Override resource requirements from the pool template
+                  properties:
+                    limits:
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                          - type: integer
+                      type: object
+                    requests:
+                      additionalProperties:
+                        anyOf:
+                          - type: string
+                          - type: integer
+                      type: object
+                  type: object
+                terminationGracePeriodSeconds:
+                  default: 60
+                  description: Grace period before forcefully terminating the runner
+                  minimum: 0
+                  type: integer
+              required:
+                - parentRef
+                - image
+              type: object
+            status:
+              description: Status of the FlameRunner
+              properties:
+                completionTime:
+                  description: Time when the runner completed
+                  format: date-time
+                  type: string
+                conditions:
+                  description: Current conditions of the FlameRunner
+                  items:
+                    properties:
+                      lastTransitionTime:
+                        format: date-time
+                        type: string
+                      message:
+                        type: string
+                      reason:
+                        type: string
+                      status:
+                        description: Status of the condition
+                        enum:
+                          - 'True'
+                          - 'False'
+                          - Unknown
+                        type: string
+                      type:
+                        description: Type of condition (e.g., Ready, PodScheduled)
+                        type: string
+                    required:
+                      - type
+                      - status
+                    type: object
+                  type: array
+                fallbackPoolUsed:
+                  description: True when the runner was created with fallback minimal pool configuration
+                  type: boolean
+                lastUpdateTime:
+                  description: Last time the status was updated by the controller
+                  format: date-time
+                  type: string
+                message:
+                  description: Human-readable status message
+                  type: string
                 observedGeneration:
                   type: integer
+                phase:
+                  description: Current phase of the runner pod
+                  enum:
+                    - Pending
+                    - Running
+                    - Succeeded
+                    - Failed
+                    - Terminating
+                  type: string
+                podIP:
+                  description: IP address of the runner pod
+                  type: string
+                podName:
+                  description: Name of the created pod
+                  type: string
+                poolNamespace:
+                  description: Namespace where the referenced FlamePool was resolved
+                  type: string
+                reason:
+                  description: Machine-readable reason for the current phase
+                  type: string
+                retryCount:
+                  description: Number of consecutive reconciliation retries while waiting for the pod
+                  minimum: 0
+                  type: integer
+                startTime:
+                  description: Time when the runner started
+                  format: date-time
+                  type: string
               type: object
+          required:
+            - spec
           type: object
-          x-kubernetes-preserve-unknown-fields: true
       served: true
       storage: true
       subresources:

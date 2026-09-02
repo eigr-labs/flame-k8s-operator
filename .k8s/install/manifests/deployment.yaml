@@ -38,7 +38,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.serviceAccountName
-          image: eigr/flame-k8s-controller:0.1.0
+          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.0
           name: flame-controller
           ports:
             - containerPort: 9001
@@ -62,7 +62,7 @@ spec:
         - args:
             - eval
             - FlameK8sController.Webhooks.bootstrap_tls(:prod, "tls-certs")
-          image: eigr/flame-k8s-controller:0.1.0
+          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.0
           name: init-certificates
       serviceAccountName: flame-controller
       volumes:

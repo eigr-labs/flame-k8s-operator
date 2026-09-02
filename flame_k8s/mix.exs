@@ -8,7 +8,7 @@ defmodule FLAME.K8s.MixProject do
     [
       app: @app,
       version: @version,
-      elixir: "~> 1.14",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -24,7 +24,7 @@ defmodule FLAME.K8s.MixProject do
     [
       {:flame, "~> 0.4.0 or ~> 0.5.0"},
       {:k8s, "~> 2.8"},
-      {:req, "~> 0.5.0"}
+      {:req, "~> 0.7"}
     ]
   end
 end

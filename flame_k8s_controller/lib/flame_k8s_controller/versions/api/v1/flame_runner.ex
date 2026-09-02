@@ -109,6 +109,14 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                   enum: ["Pending", "Running", "Succeeded", "Failed", "Terminating"],
                   description: "Current phase of the runner pod"
                 },
+                reason: %{
+                  type: :string,
+                  description: "Machine-readable reason for the current phase"
+                },
+                message: %{
+                  type: :string,
+                  description: "Human-readable status message"
+                },
                 podName: %{
                   type: :string,
                   description: "Name of the created pod"
@@ -116,6 +124,19 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                 podIP: %{
                   type: :string,
                   description: "IP address of the runner pod"
+                },
+                retryCount: %{
+                  type: :integer,
+                  minimum: 0,
+                  description: "Number of consecutive reconciliation retries while waiting for the pod"
+                },
+                poolNamespace: %{
+                  type: :string,
+                  description: "Namespace where the referenced FlamePool was resolved"
+                },
+                fallbackPoolUsed: %{
+                  type: :boolean,
+                  description: "True when the runner was created with fallback minimal pool configuration"
                 },
                 startTime: %{
                   type: :string,
@@ -126,6 +147,11 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                   type: :string,
                   format: "date-time",
                   description: "Time when the runner completed"
+                },
+                lastUpdateTime: %{
+                  type: :string,
+                  format: "date-time",
+                  description: "Last time the status was updated by the controller"
                 },
                 conditions: %{
                   type: :array,
@@ -175,6 +201,12 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
           type: :string,
           jsonPath: ".status.podName",
           description: "Name of the runner pod"
+        },
+        %{
+          name: "Retries",
+          type: :integer,
+          jsonPath: ".status.retryCount",
+          description: "Consecutive pod lookup retries"
         },
         %{
           name: "Age",

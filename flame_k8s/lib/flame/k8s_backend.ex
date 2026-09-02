@@ -32,9 +32,6 @@ defmodule FLAME.K8sBackend do
 
   require Logger
 
-  # Implements FLAME.Backend behaviour
-  # @behaviour declaration omitted to avoid compile-time dependency
-
   defstruct boot_timeout: nil,
             conn: nil,
             env: %{},
@@ -136,7 +133,18 @@ defmodule FLAME.K8sBackend do
         end
       end)
 
-    remaining_connect_window = state.boot_timeout - req_connect_time
+    remaining_connect_window = remaining_connect_window_ms(state.boot_timeout, req_connect_time)
+
+    if remaining_connect_window <= 0 do
+      Logger.error(
+        "Boot timeout exhausted before node handshake",
+        boot_timeout: state.boot_timeout,
+        request_time: req_connect_time
+      )
+
+      exit(:timeout)
+    end
+
     runner_node_name = :"#{get_node_base()}@#{new_state.runner_pod_ip}"
 
     log(state, "Waiting for Remote UP", remaining_ms: remaining_connect_window)
@@ -210,17 +218,42 @@ defmodule FLAME.K8sBackend do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  @doc false
+  def remaining_connect_window_ms(boot_timeout, req_connect_time)
+      when is_integer(boot_timeout) and is_integer(req_connect_time) do
+    max(boot_timeout - req_connect_time, 0)
+  end
+
+  @doc false
+  def resolve_kubeconfig_path do
+    case System.get_env("KUBECONFIG") do
+      nil ->
+        Path.expand("~/.kube/config")
+
+      "" ->
+        Path.expand("~/.kube/config")
+
+      value ->
+        value
+        |> String.split(":", trim: true)
+        |> List.first("~/.kube/config")
+        |> Path.expand()
+    end
+  end
+
   defp get_k8s_connection do
     case System.get_env("KUBERNETES_SERVICE_HOST") do
       nil ->
-        # Development - use kubeconfig
-        {:ok, conn} = K8s.Conn.from_file("~/.kube/config")
-        conn
+        case K8s.Conn.from_file(resolve_kubeconfig_path()) do
+          {:ok, conn} -> conn
+          {:error, reason} -> raise "unable to load kubeconfig: #{inspect(reason)}"
+        end
 
       _host ->
-        # Production - use service account
-        {:ok, conn} = K8s.Conn.from_service_account()
-        conn
+        case K8s.Conn.from_service_account() do
+          {:ok, conn} -> conn
+          {:error, reason} -> raise "unable to load in-cluster service account: #{inspect(reason)}"
+        end
     end
   end
 

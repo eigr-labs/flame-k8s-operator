@@ -4,6 +4,12 @@ defmodule FlameK8sController.Controller.FlameRunner do
 
   step(Bonny.Pluggable.SkipObservedGenerations)
   step(FlameK8sController.Handler.FlameRunnerHandler)
+  step(Bonny.Pluggable.Finalizer,
+    id: FlameK8sController.Handler.FlameRunnerHandler.finalizer_id(),
+    impl: &FlameK8sController.Handler.FlameRunnerHandler.cleanup/1,
+    add_to_resource: true,
+    log_level: :info
+  )
 
   @impl true
   def rbac_rules() do

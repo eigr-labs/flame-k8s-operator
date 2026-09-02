@@ -65,6 +65,24 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
                   description:
                     "The generation observed by the controller. Used to track reconciliation progress."
                 },
+                phase: %{
+                  type: :string,
+                  enum: ["Ready", "Invalid"],
+                  description: "Overall semantic validation phase for the FlamePool"
+                },
+                reason: %{
+                  type: :string,
+                  description: "Machine-readable reason for the current phase"
+                },
+                message: %{
+                  type: :string,
+                  description: "Human-readable message about the current phase"
+                },
+                lastUpdateTime: %{
+                  type: :string,
+                  format: "date-time",
+                  description: "Last time the status was updated by the controller"
+                },
                 conditions: %{
                   type: :array,
                   description: "Current conditions of the FlamePool",
@@ -103,6 +121,12 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
         }
       },
       additionalPrinterColumns: [
+        %{
+          name: "Phase",
+          type: :string,
+          jsonPath: ".status.phase",
+          description: "Current semantic validation phase"
+        },
         %{
           name: "Age",
           type: :date,
