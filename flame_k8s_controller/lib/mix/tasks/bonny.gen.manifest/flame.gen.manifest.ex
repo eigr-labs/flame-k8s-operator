@@ -209,7 +209,7 @@ defmodule Mix.Tasks.Flame.Gen.Manifest do
         clientConfig:
           service:
             namespace: #{namespace}
-            name: flame-k8s
+            name: flame-controller
             path: /admission-review/mutating
             port: 443
     """

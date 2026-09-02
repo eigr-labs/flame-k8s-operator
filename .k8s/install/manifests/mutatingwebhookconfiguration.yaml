@@ -8,7 +8,7 @@ webhooks:
       - v1
     clientConfig:
       service:
-        name: flame-k8s
+        name: flame-controller
         namespace: flame
         path: /admission-review/mutating
         port: 443

@@ -31,6 +31,7 @@ defmodule FlameK8sController.K8s.Pod do
     pool_template = get_pool_template(pool_config)
     parent_ref = get_parent_ref(runner_spec)
     image = get_image(runner_spec)
+    termination_grace_period_seconds = get_termination_grace_period_seconds(runner_spec)
 
     # Merge container specs from pool and runner
     container = merge_container_spec(pool_template, runner_spec, image, parent_ref)
@@ -40,6 +41,7 @@ defmodule FlameK8sController.K8s.Pod do
       pool_template["spec"]
       |> Map.put("containers", [container])
       |> Map.put("restartPolicy", "Never")
+      |> Map.put("terminationGracePeriodSeconds", termination_grace_period_seconds)
       |> maybe_add_owner_reference(parent_ref)
 
     # Add FLAME-specific labels
@@ -72,6 +74,11 @@ defmodule FlameK8sController.K8s.Pod do
 
   defp get_image(runner_spec) do
     Map.get(runner_spec, "image") || Map.get(runner_spec, :image)
+  end
+
+  defp get_termination_grace_period_seconds(runner_spec) do
+    Map.get(runner_spec, "terminationGracePeriodSeconds") ||
+      Map.get(runner_spec, :terminationGracePeriodSeconds) || 60
   end
 
   defp merge_container_spec(pool_template, runner_spec, image, parent_ref) do

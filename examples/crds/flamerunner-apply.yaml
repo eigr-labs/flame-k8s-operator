@@ -1,0 +1,16 @@
+apiVersion: flame.org/v1
+kind: FlameRunner
+metadata:
+  name: runner-example-001
+  namespace: flame
+spec:
+  parentRef:
+    name: parent-app-pod-1
+    namespace: flame
+    uid: "f0ab3d8b-f860-42d9-bf6a-581eb6e64992"
+  image: ghcr.io/eigr/example-runner:1.0.0
+  poolRef: cpu-balanced
+  terminationGracePeriodSeconds: 60
+  env:
+    - name: CUSTOM_FLAG
+      value: "enabled"

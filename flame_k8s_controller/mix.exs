@@ -8,7 +8,7 @@ defmodule FlameK8sController.MixProject do
     [
       app: @app,
       version: @version,
-      elixir: "~> 1.14",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -37,9 +37,10 @@ defmodule FlameK8sController.MixProject do
     [
       {:bakeware, ">= 0.0.0", runtime: false},
       {:bandit, "~> 1.1"},
-      {:bonny, "~> 1.4"},
+      {:bonny, "~> 1.5"},
       {:castore, "~> 1.0"},
-      {:k8s_webhoox, "~> 0.2"}
+      {:k8s_webhoox, "~> 0.2"},
+      {:x509, "~> 0.9.2", override: true}
     ]
   end
 

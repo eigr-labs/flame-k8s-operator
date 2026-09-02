@@ -2,21 +2,22 @@ FROM elixir:1.18-otp-27 AS builder
 
 ENV MIX_ENV=prod
 
-WORKDIR /app
+WORKDIR /app/examples/flame_example
 
 RUN apt-get update \
-        && apt-get install -y --no-install-recommends \
-            git \
-            build-essential \
-            ca-certificates \
-            zstd \
-            pkg-config \
-            libssl-dev \
-        && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+      git \
+      build-essential \
+      ca-certificates \
+      zstd \
+      pkg-config \
+      libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY mix.exs mix.lock ./
-COPY config ./config
-COPY lib ./lib
+COPY examples/flame_example/mix.exs examples/flame_example/mix.lock ./
+COPY examples/flame_example/config ./config
+COPY examples/flame_example/lib ./lib
+COPY flame_k8s /app/flame_k8s
 
 RUN mix local.rebar --force \
     && mix local.hex --force \
@@ -29,7 +30,7 @@ ENV RELEASE_DISTRIBUTION="name"
 ENV POD_IP="127.0.0.1"
 
 # This will be the basename of node
-ENV RELEASE_NAME="flame_k8s_controller"
+ENV RELEASE_NAME="flame_example"
 
 # This will be the full nodename
 ENV RELEASE_NODE="${RELEASE_NAME}@${POD_IP}"
@@ -38,7 +39,7 @@ RUN test -d rel || mix release.init
 
 RUN echo "-setcookie ${NODE_COOKIE}" >> ./rel/vm.args.eex
 
-RUN mix release flame_k8s_controller
+RUN mix release flame_example
 
 # ---- Application Stage ----
 FROM debian:bookworm-slim
@@ -60,7 +61,7 @@ RUN chown nobody /app
 ENV MIX_ENV=prod
 ENV HOME=/app
 
-COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/bakeware/ ./
+COPY --from=builder --chown=nobody:root /app/examples/flame_example/_build/${MIX_ENV}/rel/bakeware/ ./
 
 RUN mkdir -p /app/.cache/bakeware/ && chmod 777 /app/.cache/bakeware/
 RUN touch /.erlang.cookie && chmod 777 /.erlang.cookie
@@ -68,4 +69,4 @@ RUN touch /app/.erlang.cookie && chmod 777 /app/.erlang.cookie
 
 USER nobody
 
-ENTRYPOINT [ "./flame_k8s_controller", "start" ] 
+ENTRYPOINT [ "./flame_example", "start" ] 

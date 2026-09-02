@@ -17,6 +17,57 @@ end
 
 > **_NOTE:_** You need to install our Kubernetes Controller in the Kubernetes where you want to run your application. Follow the instructions below
 
+## Local End-to-End Validation (Before Publish)
+
+You can validate the full workflow on a developer machine before publishing:
+
+- compile and run tests for all apps
+- build local operator and example images
+- create local kind cluster
+- generate and apply operator manifests
+- apply CRD examples and example application
+- verify deployed resources
+
+Run from repository root:
+
+```bash
+make local-e2e
+```
+
+Required local tools:
+
+- `docker`
+- `kubectl`
+- `kind`
+
+You can run only the preflight checks:
+
+```bash
+make preflight-local
+```
+
+Useful commands:
+
+```bash
+# Remove local validation cluster
+make local-reset
+
+# Only regenerate manifests for a specific image tag
+make generate-k8s-manifests version=dev-local
+```
+
+By default, `local-e2e` uses:
+
+- cluster name: `flame-local`
+- operator namespace: `flame`
+- operator image tag for local validation: `ghcr.io/eigr-labs/flame-k8s-controller:dev-local`
+
+You can override Make variables when needed, for example:
+
+```bash
+make local-e2e cluster_name=my-cluster operator_namespace=flame version=dev-local
+```
+
 ### Install Kubernetes Controller
 
 To install flame-k8s kubernetes controller, just download the manifest from the [release page](https://github.com/eigr-labs/flame-k8s/releases) and apply it to your cluster.

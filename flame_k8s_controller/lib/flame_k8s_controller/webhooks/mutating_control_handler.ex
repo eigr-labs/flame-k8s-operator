@@ -9,31 +9,15 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
   import K8sWebhoox.AdmissionControl.AdmissionReview
 
   mutate "apps/v1/deployments", conn do
-    %Conn{
-      request: request
-    } = conn
-
-    %{"object" => %{"spec" => spec}} = request
-
-    metadata = Map.get(spec, "template", %{})["metadata"]
-
-    resp =
-      if is_flame_enabled?(metadata) do
-        create_patch(conn, patch_obj(spec, metadata))
-      else
-        conn
-      end
-
-    allow(resp)
+    conn
+    |> maybe_patch_workload()
+    |> allow()
   end
 
   mutate "apps/v1/statefulsets", conn do
-    %Conn{
-      request: _request,
-      response: _response
-    } = conn
-
-    allow(conn)
+    conn
+    |> maybe_patch_workload()
+    |> allow()
   end
 
   defp is_flame_enabled?(metadata) do
@@ -47,16 +31,18 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
 
     timeout_to_shoot_headhead =
       Map.get(annotations, "flame.org/runner-termination-timeout", 60000)
+      |> to_string()
+
+    template = Map.get(spec, "template", %{})
+    pod_spec = Map.get(template, "spec", %{})
 
     container =
-      spec
-      |> Map.get("template", %{})
-      |> Map.get("spec", %{})
+      pod_spec
       |> Map.get("containers", [])
       |> List.first()
 
     base_pod =
-      Jason.encode!(spec.template)
+      Jason.encode!(template)
       |> Base.encode64()
 
     envs =
@@ -77,29 +63,66 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
       |> maybe_put_distribution(annotations)
 
     updated_envs =
-      case Map.get(container, "env") do
+      case container do
         nil ->
-          %{
-            "op" => "add",
-            "path" => "/spec/template/spec/containers/0",
-            "value" => %{"env" => envs}
-          }
+          nil
 
-        existing_envs ->
-          %{
-            "op" => "replace",
-            "path" => "/spec/template/spec/containers/0/env",
-            "value" => existing_envs ++ envs
-          }
+        _ ->
+          case Map.get(container, "env") do
+            nil ->
+              %{
+                "op" => "add",
+                "path" => "/spec/template/spec/containers/0/env",
+                "value" => envs
+              }
+
+            existing_envs ->
+              %{
+                "op" => "replace",
+                "path" => "/spec/template/spec/containers/0/env",
+                "value" => existing_envs ++ envs
+              }
+          end
       end
 
-    [updated_envs]
-    |> Jason.encode!()
-    |> Base.encode64()
+    case updated_envs do
+      nil ->
+        nil
+
+      patch ->
+        [patch]
+        |> Jason.encode!()
+        |> Base.encode64()
+    end
+  end
+
+  defp maybe_patch_workload(%Conn{request: request} = conn) do
+    spec = get_in(request, ["object", "spec"]) || %{}
+    metadata = get_in(spec, ["template", "metadata"]) || %{}
+
+    if is_flame_enabled?(metadata) do
+      case patch_obj(spec, metadata) do
+        nil ->
+          conn
+
+        patch ->
+          create_patch(conn, patch)
+      end
+    else
+      conn
+    end
   end
 
   defp create_patch(conn, patch_obj) do
-    %Conn{conn | response: %{conn.response | patch: patch_obj, patchType: "JSONPatch"}}
+    %Conn{} = conn
+
+    response =
+      conn.response
+      |> Map.new()
+      |> Map.put("patch", patch_obj)
+      |> Map.put("patchType", "JSONPatch")
+
+    %{conn | response: response}
   end
 
   defp maybe_put_distribution(envs, annotations) do

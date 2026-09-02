@@ -8,7 +8,7 @@ defmodule FlameExample.MixProject do
     [
       app: @app,
       version: @version,
-      elixir: "~> 1.14",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       releases: releases()
@@ -26,7 +26,7 @@ defmodule FlameExample.MixProject do
     [
       {:bakeware, ">= 0.0.0", runtime: false},
       {:bandit, "~> 1.1"},
-      {:flame_k8s, path: "../flame_k8s"}
+      {:flame_k8s, path: "../../flame_k8s"}
     ]
   end
 
