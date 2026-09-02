@@ -34,6 +34,25 @@ Run from repository root:
 make local-e2e
 ```
 
+The install flow now generates or reuses the operator Erlang cookie Secret at apply time.
+
+- Operator namespace secret: `flame-erlang-cookie`
+- Workload namespace copies are created by the operator when FLAME-enabled workloads or runners are admitted
+
+Helper scripts:
+
+```bash
+bash scripts/install-operator.sh --manifest-dir .k8s/install/manifests --namespace flame
+```
+
+Release/tag based install for end users:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eigr-labs/flame-k8s-operator/v0.1.0/scripts/install-operator.sh | bash -s -- --tag v0.1.0 --namespace flame
+```
+
+If `--tag` is omitted, the installer tries to resolve the latest GitHub release automatically.
+
 Required local tools:
 
 - `docker`

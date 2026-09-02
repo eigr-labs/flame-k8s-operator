@@ -9,7 +9,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandlerTest do
       conn =
         admission_conn("deployments", %{
           "template" => %{
-            "metadata" => %{"annotations" => %{"flame.org/enabled" => "true"}},
+            "metadata" => %{"annotations" => %{"flame.org/enabled" => "true", "flame.org/otp-app" => "my_app_release_name"}},
             "spec" => %{
               "containers" => [
                 %{
@@ -28,11 +28,43 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandlerTest do
       assert is_binary(result.response["patch"])
       assert result.response["patchType"] == "JSONPatch"
 
-      [patch_op] = decode_patch(result.response["patch"])
-      assert patch_op["op"] == "replace"
-      assert patch_op["path"] == "/spec/template/spec/containers/0/env"
-      assert contains_env_name?(patch_op["value"], "FLAME_POOL_CONFIG_REF")
-      assert contains_env_name?(patch_op["value"], "BASE_POD")
+      patch_ops = decode_patch(result.response["patch"])
+
+      service_account_patch = Enum.find(patch_ops, &(&1["path"] == "/spec/template/spec/serviceAccountName"))
+      env_patch = Enum.find(patch_ops, &(&1["path"] == "/spec/template/spec/containers/0/env"))
+
+      assert service_account_patch["op"] == "add"
+      assert service_account_patch["value"] == "flame-workload"
+      assert env_patch["op"] == "replace"
+      assert contains_env_name?(env_patch["value"], "FLAME_POOL_CONFIG_REF")
+      assert contains_env_name?(env_patch["value"], "BASE_POD")
+      assert contains_env_name?(env_patch["value"], "RELEASE_DISTRIBUTION")
+      assert contains_env_name?(env_patch["value"], "RELEASE_NODE")
+    end
+
+    test "respects explicit disable of dist auto config" do
+      conn =
+        admission_conn("deployments", %{
+          "template" => %{
+            "metadata" => %{"annotations" => %{"flame.org/enabled" => "true", "flame.org/otp-app" => "my_app_release_name", "flame.org/dist-auto-config" => "false"}},
+            "spec" => %{
+              "containers" => [
+                %{
+                  "name" => "app",
+                  "image" => "ghcr.io/example/app:latest",
+                  "env" => [%{"name" => "EXISTING_ENV", "value" => "1"}]
+                }
+              ]
+            }
+          }
+        })
+
+      result = MutatingControlHandler.handle(conn, nil)
+      patch_ops = decode_patch(result.response["patch"])
+      env_patch = Enum.find(patch_ops, &(&1["path"] == "/spec/template/spec/containers/0/env"))
+
+      refute contains_env_name?(env_patch["value"], "RELEASE_DISTRIBUTION")
+      refute contains_env_name?(env_patch["value"], "RELEASE_NODE")
     end
 
     test "adds flame env patch for statefulsets" do
@@ -56,10 +88,14 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandlerTest do
       assert result.response["allowed"] == true
       assert is_binary(result.response["patch"])
 
-      [patch_op] = decode_patch(result.response["patch"])
-      assert patch_op["op"] == "add"
-      assert patch_op["path"] == "/spec/template/spec/containers/0/env"
-      assert contains_env_name?(patch_op["value"], "POD_NAME")
+      patch_ops = decode_patch(result.response["patch"])
+      service_account_patch = Enum.find(patch_ops, &(&1["path"] == "/spec/template/spec/serviceAccountName"))
+      env_patch = Enum.find(patch_ops, &(&1["path"] == "/spec/template/spec/containers/0/env"))
+
+      assert service_account_patch["op"] == "add"
+      assert service_account_patch["value"] == "flame-workload"
+      assert env_patch["op"] == "add"
+      assert contains_env_name?(env_patch["value"], "POD_NAME")
     end
 
     test "does not patch when flame is not enabled" do

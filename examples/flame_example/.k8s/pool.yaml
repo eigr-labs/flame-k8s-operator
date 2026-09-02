@@ -13,11 +13,11 @@ spec:
               value: "my-value"
           resources:
             limits:
+              cpu: 200m
+              memory: 512Mi
+            requests:
               cpu: 100m
               memory: 256Mi
-            requests:
-              cpu: 200m
-              memory: 2Gi
           volumeMounts:
             - mountPath: /app/.cache/bakeware/
               name: bakeware-cache

@@ -29,6 +29,7 @@ defmodule FLAME.K8sBackend do
   @behaviour FLAME.Backend
 
   alias FLAME.K8sBackend
+  alias FLAME.Parent
 
   require Logger
 
@@ -58,7 +59,7 @@ defmodule FLAME.K8sBackend do
     provided_opts =
       conf
       |> Keyword.merge(opts)
-      |> Keyword.validate!(@valid_opts)
+      |> sanitize_init_opts()
 
     state = struct(default, provided_opts)
 
@@ -69,16 +70,11 @@ defmodule FLAME.K8sBackend do
     end
 
     parent_ref = make_ref()
+    runner_node_base = get_node_base()
 
-    # Encode parent info - will be decoded by FLAME library at runtime
+    # Encode parent info in FLAME's expected format.
     encoded_parent =
-      %{
-        ref: parent_ref,
-        pid: self(),
-        backend: __MODULE__
-      }
-      |> :erlang.term_to_binary()
-      |> Base.encode64()
+      encode_parent(parent_ref, self(), runner_node_base, "POD_IP")
 
     new_env =
       Map.merge(
@@ -97,6 +93,20 @@ defmodule FLAME.K8sBackend do
       )
 
     {:ok, initial_state}
+  end
+
+  @doc false
+  def encode_parent(parent_ref, parent_pid, node_base, host_env)
+      when is_reference(parent_ref) and is_pid(parent_pid) and is_binary(node_base) and
+             is_binary(host_env) do
+    parent_ref
+    |> Parent.new(parent_pid, __MODULE__, node_base, host_env)
+    |> Parent.encode()
+  end
+
+  @doc false
+  def sanitize_init_opts(opts) when is_list(opts) do
+    Keyword.take(opts, @valid_opts)
   end
 
   @impl true
@@ -266,6 +276,7 @@ defmodule FLAME.K8sBackend do
     pod_name = System.get_env("POD_NAME") || "unknown-parent"
     pod_namespace = System.get_env("POD_NAMESPACE") || "default"
     pool_ref = System.get_env("FLAME_POOL_CONFIG_REF") || "default-pool"
+    cookie_secret_ref = System.get_env("FLAME_COOKIE_SECRET_REF") || "flame-erlang-cookie"
 
     parent_uid = get_parent_pod_uid(state.conn, pod_namespace, pod_name)
 
@@ -291,6 +302,7 @@ defmodule FLAME.K8sBackend do
         },
         "image" => image,
         "poolRef" => pool_ref,
+        "cookieSecretRef" => cookie_secret_ref,
         "env" => encode_k8s_env(state.env)
       }
     }

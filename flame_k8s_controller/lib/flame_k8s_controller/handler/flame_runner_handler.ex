@@ -65,8 +65,8 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
 
   - If referenced pool does not exist, the handler uses a minimal fallback pool.
   - `status.fallbackPoolUsed` is set to `true` for traceability.
-  - During reconcile, missing pod lookups increment `status.retryCount`.
-  - After the retry threshold, the runner transitions to `Failed`.
+  - During reconcile, missing pod lookups keep the runner in `NotProvisioned`.
+  - Only terminal reconcile errors transition the runner to `Failed`.
 
   ## Finalizer Behavior
 
@@ -79,6 +79,7 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
   - removes the finalizer only after cleanup step succeeds
   """
 
+  alias FlameK8sController.K8s.CookieSecret
   alias FlameK8sController.K8s.Pod
   alias FlameK8sController.Operator
 
@@ -86,7 +87,6 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
 
   @behaviour Pluggable
   @finalizer_id "flame.org/flamerunner-cleanup"
-  @max_pod_not_found_retries 5
 
   def finalizer_id, do: @finalizer_id
 
@@ -132,11 +132,13 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
     %Bonny.Axn{resource: resource, conn: conn} = axn
 
     with {:ok, args} <- parse_runner_args(resource),
+         :ok <- ensure_runner_cookie_secret(conn, args),
          {:ok, pool_config, pool_resolution} <- fetch_pool_config(conn, args),
-         {:ok, pod_manifest} <- build_pod_manifest(args, pool_config) do
+          {:ok, pod_manifest} <- build_pod_manifest(args, pool_config),
+          :ok <- validate_runner_pod_manifest(pod_manifest) do
       axn
       |> Bonny.Axn.register_descendant(pod_manifest)
-      |> update_runner_status(resource, :pending, nil, Map.put(pool_resolution, "retryCount", 0))
+      |> update_runner_status(resource, :not_provisioned, nil, Map.put(pool_resolution, "retryCount", 0))
       |> Bonny.Axn.success_event()
     else
       {:error, reason} ->
@@ -268,6 +270,12 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
     end
   end
 
+  defp ensure_runner_cookie_secret(conn, %{namespace: namespace, spec: spec}) do
+    cookie_secret_ref = Map.get(spec, "cookieSecretRef") || Map.get(spec, :cookieSecretRef) || "flame-erlang-cookie"
+
+    CookieSecret.ensure_namespace_secret(namespace, cookie_secret_ref, conn: conn)
+  end
+
   defp update_runner_status(axn, resource, phase, message),
     do: update_runner_status(axn, resource, phase, message, %{})
 
@@ -304,7 +312,7 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
     }
 
     status =
-      if phase in [:pending, :terminating] do
+      if phase in [:not_provisioned, :pending, :terminating] do
         Map.put(status, "podName", Map.get(metadata, "name"))
       else
         status
@@ -319,9 +327,15 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
   def build_status_from_pod(resource, pod_status) do
     phase = normalize_runner_phase(pod_status["phase"])
     phase_atom = String.downcase(phase) |> String.to_atom()
-    message = pod_status["message"]
+    message = pod_status["message"] || phase_message(phase_atom)
     reason = pod_status["reason"] || phase_reason(phase_atom)
-    conditions = pod_status["conditions"] || build_conditions(phase_atom, message)
+    conditions =
+      pod_status["conditions"]
+      |> sanitize_pod_conditions()
+      |> case do
+        [] -> build_conditions(phase_atom, message)
+        sanitized -> sanitized
+      end
 
     status = %{
       "observedGeneration" => Map.get(resource, "metadata", %{}) |> Map.get("generation", 1),
@@ -330,10 +344,9 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
       "podName" => pod_status["name"],
       "podIP" => pod_status["podIP"],
       "conditions" => conditions,
+      "message" => message,
       "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
-
-    status = if message, do: Map.put(status, "message", message), else: status
 
     status =
       if start_time = pod_status["startTime"] do
@@ -380,30 +393,39 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
   defp handle_missing_runner_pod(axn, resource, reason) do
     retry_count = current_retry_count(resource) + 1
 
-    if retry_count >= @max_pod_not_found_retries do
-      axn
-      |> update_runner_status(
-        resource,
-        :failed,
-        "Runner pod was not found after #{@max_pod_not_found_retries} reconciliation attempts",
-        %{"retryCount" => retry_count, "reason" => "PodNotFoundTimeout"}
-      )
-      |> Bonny.Axn.failure_event(
-        message:
-          "Runner pod was not found after #{@max_pod_not_found_retries} reconciliation attempts"
-      )
+    if pod_not_found_error?(reason) do
+      case ensure_runner_descendant(axn, resource) do
+        {:ok, axn_with_descendant} ->
+          axn_with_descendant
+          |> update_runner_status(
+            resource,
+            :not_provisioned,
+            "Runner pod is being provisioned",
+            %{"retryCount" => retry_count, "reason" => "PodNotProvisioned"}
+          )
+          |> Bonny.Axn.success_event(
+            message: "Runner pod is being provisioned, retry #{retry_count}"
+          )
+
+        {:error, ensure_error} ->
+          axn
+          |> update_runner_status(
+            resource,
+            :failed,
+            "Failed to ensure runner pod descendant",
+            %{"retryCount" => retry_count, "reason" => "PodEnsureFailed"}
+          )
+          |> Bonny.Axn.failure_event(message: "Failed to ensure runner pod descendant: #{ensure_error}")
+      end
     else
       axn
       |> update_runner_status(
         resource,
-        :pending,
-        "Runner pod not found yet, retry #{retry_count}/#{@max_pod_not_found_retries}",
-        %{"retryCount" => retry_count, "reason" => "PodNotFound"}
+        :failed,
+        "Runner pod lookup failed",
+        %{"retryCount" => retry_count, "reason" => "PodLookupFailed"}
       )
-      |> Bonny.Axn.success_event(
-        message:
-          "Runner pod not found yet, retry #{retry_count}/#{@max_pod_not_found_retries}: #{inspect(reason)}"
-      )
+      |> Bonny.Axn.failure_event(message: "Runner pod lookup failed: #{inspect(reason)}")
     end
   end
 
@@ -436,6 +458,28 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
   defp pod_not_found_error?(%{status: 404}), do: true
   defp pod_not_found_error?(_), do: false
 
+  defp ensure_runner_descendant(%Bonny.Axn{conn: conn} = axn, resource) do
+    with {:ok, args} <- parse_runner_args(resource),
+         :ok <- ensure_runner_cookie_secret(conn, args),
+         {:ok, pool_config, _pool_resolution} <- fetch_pool_config(conn, args),
+         {:ok, pod_manifest} <- build_pod_manifest(args, pool_config),
+         :ok <- validate_runner_pod_manifest(pod_manifest) do
+      {:ok, Bonny.Axn.register_descendant(axn, pod_manifest)}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_runner_pod_manifest(pod_manifest) do
+    case get_in(pod_manifest, ["spec", "containers"]) do
+      [container | _] ->
+        Pod.validate_resources(container)
+
+      _ ->
+        {:error, "Runner pod manifest must contain at least one container"}
+    end
+  end
+
   defp apply_status_patch(conn, resource, status) do
     resource
     |> Map.put("status", status)
@@ -444,6 +488,7 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
     _ -> :noop
   end
 
+  defp phase_to_string(:not_provisioned), do: "NotProvisioned"
   defp phase_to_string(phase) when is_atom(phase), do: phase |> to_string() |> String.capitalize()
   defp phase_to_string(phase) when is_binary(phase), do: phase
 
@@ -454,12 +499,21 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
   defp normalize_runner_phase("Terminating"), do: "Terminating"
   defp normalize_runner_phase(_), do: "Pending"
 
+  defp phase_reason(:not_provisioned), do: "PodNotProvisioned"
   defp phase_reason(:pending), do: "PodPending"
   defp phase_reason(:running), do: "PodRunning"
   defp phase_reason(:succeeded), do: "PodSucceeded"
   defp phase_reason(:failed), do: "PodFailed"
   defp phase_reason(:terminating), do: "PodTerminating"
   defp phase_reason(_), do: "RunnerUpdated"
+
+  defp phase_message(:not_provisioned), do: "Runner pod has not been created yet"
+  defp phase_message(:pending), do: "Runner pod is pending"
+  defp phase_message(:running), do: "Runner pod is running"
+  defp phase_message(:succeeded), do: "Runner pod completed successfully"
+  defp phase_message(:failed), do: "Runner pod failed"
+  defp phase_message(:terminating), do: "Runner pod is terminating"
+  defp phase_message(_), do: "Runner status updated"
 
   defp extract_completion_time(status) do
     statuses = Map.get(status, "containerStatuses", [])
@@ -495,12 +549,45 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
     end)
   end
 
+  defp sanitize_pod_conditions(conditions) when is_list(conditions) do
+    conditions
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn condition ->
+      %{}
+      |> put_if_present("type", Map.get(condition, "type"))
+      |> put_if_present("status", Map.get(condition, "status"))
+      |> put_if_present("lastTransitionTime", Map.get(condition, "lastTransitionTime"))
+      |> put_if_present("reason", Map.get(condition, "reason"))
+      |> put_if_present("message", Map.get(condition, "message"))
+    end)
+    |> Enum.filter(fn condition ->
+      Map.get(condition, "type") not in [nil, ""] and
+        Map.get(condition, "status") not in [nil, ""]
+    end)
+  end
+
+  defp sanitize_pod_conditions(_), do: []
+
+  defp put_if_present(map, _key, nil), do: map
+  defp put_if_present(map, _key, ""), do: map
+  defp put_if_present(map, key, value), do: Map.put(map, key, value)
+
   defp build_conditions(phase, message) do
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
     base_condition = %{"lastTransitionTime" => now, "status" => "True"}
 
     case phase do
+      :not_provisioned ->
+        [
+          Map.merge(base_condition, %{
+            "type" => "Ready",
+            "status" => "Unknown",
+            "reason" => "PodNotProvisioned",
+            "message" => message || "Runner pod has not been created yet"
+          })
+        ]
+
       :pending ->
         [
           Map.merge(base_condition, %{

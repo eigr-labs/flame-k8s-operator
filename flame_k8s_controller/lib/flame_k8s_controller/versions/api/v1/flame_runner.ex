@@ -54,6 +54,12 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                     "Reference to a FlamePool for configuration template. If not specified, uses 'default-pool'",
                   default: "default-pool"
                 },
+                cookieSecretRef: %{
+                  type: :string,
+                  description:
+                    "Name of the Kubernetes Secret in the runner namespace that stores the Erlang distribution cookie",
+                  default: "flame-erlang-cookie"
+                },
                 env: %{
                   type: :array,
                   description: "Additional environment variables for the runner",
@@ -77,13 +83,13 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                     limits: %{
                       type: :object,
                       additionalProperties: %{
-                        anyOf: [%{type: :string}, %{type: :integer}]
+                        type: :string
                       }
                     },
                     requests: %{
                       type: :object,
                       additionalProperties: %{
-                        anyOf: [%{type: :string}, %{type: :integer}]
+                        type: :string
                       }
                     }
                   }
@@ -106,7 +112,7 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                 },
                 phase: %{
                   type: :string,
-                  enum: ["Pending", "Running", "Succeeded", "Failed", "Terminating"],
+                  enum: ["NotProvisioned", "Pending", "Running", "Succeeded", "Failed", "Terminating"],
                   description: "Current phase of the runner pod"
                 },
                 reason: %{
@@ -128,11 +134,15 @@ defmodule FlameK8sController.Versions.Api.V1.FlameRunner do
                 retryCount: %{
                   type: :integer,
                   minimum: 0,
-                  description: "Number of consecutive reconciliation retries while waiting for the pod"
+                  description: "Number of consecutive reconciliation retries while waiting for the pod to be provisioned"
                 },
                 poolNamespace: %{
                   type: :string,
                   description: "Namespace where the referenced FlamePool was resolved"
+                },
+                poolRef: %{
+                  type: :string,
+                  description: "Reference to the FlamePool used to build the runner"
                 },
                 fallbackPoolUsed: %{
                   type: :boolean,

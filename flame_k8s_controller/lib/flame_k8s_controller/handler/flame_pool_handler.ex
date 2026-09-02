@@ -38,6 +38,7 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
   """
 
   require Logger
+  alias FlameK8sController.K8s.Pod
 
   @behaviour Pluggable
   @finalizer_id "flame.org/flamepool-protection"
@@ -84,6 +85,24 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
 
     case validate_pool_config(resource) do
       :ok ->
+        conditions =
+          sanitize_conditions([
+            %{
+              "type" => "Ready",
+              "status" => "True",
+              "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+              "reason" => "ConfigurationValid",
+              "message" => "FlamePool configuration is valid"
+            },
+            %{
+              "type" => "TemplateValid",
+              "status" => "True",
+              "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+              "reason" => "TemplateAccepted",
+              "message" => "Pod template passed semantic validation"
+            }
+          ])
+
         axn
         |> Bonny.Axn.update_status(fn _current_status ->
           %{
@@ -92,28 +111,31 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
             "reason" => "ConfigurationValid",
             "message" => "FlamePool configuration is valid",
             "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-            "conditions" => [
-              %{
-                "type" => "Ready",
-                "status" => "True",
-                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-                "reason" => "ConfigurationValid",
-                "message" => "FlamePool configuration is valid"
-              },
-              %{
-                "type" => "TemplateValid",
-                "status" => "True",
-                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-                "reason" => "TemplateAccepted",
-                "message" => "Pod template passed semantic validation"
-              }
-            ]
+            "conditions" => conditions
           }
         end)
         |> Bonny.Axn.success_event()
 
       {:error, reason} ->
         Logger.warning("FlamePool validation failed: #{reason}")
+
+        conditions =
+          sanitize_conditions([
+            %{
+              "type" => "Ready",
+              "status" => "False",
+              "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+              "reason" => "ConfigurationInvalid",
+              "message" => reason
+            },
+            %{
+              "type" => "TemplateValid",
+              "status" => "False",
+              "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+              "reason" => "TemplateRejected",
+              "message" => reason
+            }
+          ])
 
         axn
         |> Bonny.Axn.update_status(fn _current_status ->
@@ -123,22 +145,7 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
             "reason" => "ConfigurationInvalid",
             "message" => reason,
             "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-            "conditions" => [
-              %{
-                "type" => "Ready",
-                "status" => "False",
-                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-                "reason" => "ConfigurationInvalid",
-                "message" => reason
-              },
-              %{
-                "type" => "TemplateValid",
-                "status" => "False",
-                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-                "reason" => "TemplateRejected",
-                "message" => reason
-              }
-            ]
+            "conditions" => conditions
           }
         end)
         |> Bonny.Axn.failure_event(message: reason)
@@ -186,9 +193,47 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
         {:error, "Each container env entry must include a non-empty name"}
 
       true ->
-        :ok
+        validate_container_resources(containers)
     end
   end
+
+  defp validate_container_resources(containers) do
+    containers
+    |> Enum.with_index()
+    |> Enum.find_value(:ok, fn {container, index} ->
+      case Pod.validate_resources(container) do
+        :ok ->
+          nil
+
+        {:error, reason} ->
+          {:error, "Invalid resources in podTemplate.spec.containers[#{index}]: #{reason}"}
+      end
+    end)
+  end
+
+  @doc false
+  def sanitize_conditions(conditions) when is_list(conditions) do
+    conditions
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn condition ->
+      %{}
+      |> put_if_present("type", Map.get(condition, "type"))
+      |> put_if_present("status", Map.get(condition, "status"))
+      |> put_if_present("lastTransitionTime", Map.get(condition, "lastTransitionTime"))
+      |> put_if_present("reason", Map.get(condition, "reason"))
+      |> put_if_present("message", Map.get(condition, "message"))
+    end)
+    |> Enum.filter(fn condition ->
+      Map.get(condition, "type") not in [nil, ""] and
+        Map.get(condition, "status") not in [nil, ""]
+    end)
+  end
+
+  def sanitize_conditions(_), do: []
+
+  defp put_if_present(map, _key, nil), do: map
+  defp put_if_present(map, _key, ""), do: map
+  defp put_if_present(map, key, value), do: Map.put(map, key, value)
 
   defp invalid_env_entries?(container) do
     env = Map.get(container, "env", [])

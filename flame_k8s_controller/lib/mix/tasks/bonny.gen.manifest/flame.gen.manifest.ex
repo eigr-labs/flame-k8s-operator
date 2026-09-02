@@ -197,6 +197,8 @@ defmodule Mix.Tasks.Flame.Gen.Manifest do
     webhooks:
       - name: "flame-k8s.flame.org"
         admissionReviewVersions: ["v1"]
+        sideEffects: None
+        timeoutSeconds: 10
         matchPolicy: Equivalent
         rules:
           - operations: ['CREATE', 'UPDATE']

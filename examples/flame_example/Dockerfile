@@ -37,8 +37,6 @@ ENV RELEASE_NODE="${RELEASE_NAME}@${POD_IP}"
 
 RUN test -d rel || mix release.init
 
-RUN echo "-setcookie ${NODE_COOKIE}" >> ./rel/vm.args.eex
-
 RUN mix release flame_example
 
 # ---- Application Stage ----
@@ -64,8 +62,6 @@ ENV HOME=/app
 COPY --from=builder --chown=nobody:root /app/examples/flame_example/_build/${MIX_ENV}/rel/bakeware/ ./
 
 RUN mkdir -p /app/.cache/bakeware/ && chmod 777 /app/.cache/bakeware/
-RUN touch /.erlang.cookie && chmod 777 /.erlang.cookie
-RUN touch /app/.erlang.cookie && chmod 777 /app/.erlang.cookie
 
 USER nobody
 

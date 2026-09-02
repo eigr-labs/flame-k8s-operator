@@ -38,7 +38,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.serviceAccountName
-          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.0
+            - name: RELEASE_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  key: cookie
+                  name: flame-erlang-cookie
+          image: ghcr.io/eigr-labs/flame-k8s-controller:dev-local
           name: flame-controller
           ports:
             - containerPort: 9001
@@ -56,17 +61,31 @@ spec:
             runAsNonRoot: true
             runAsUser: 1001
           volumeMounts:
+            - mountPath: /app/.cache/bakeware/
+              name: bakeware-cache
             - mountPath: /mnt/cert
               name: certs
       initContainers:
-        - args:
-            - eval
-            - FlameK8sController.Webhooks.bootstrap_tls(:prod, "tls-certs")
-          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.0
+        - env:
+            - name: RELEASE_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  key: cookie
+                  name: flame-erlang-cookie
+            - name: FLAME_BOOTSTRAP_TLS_ONLY
+              value: 'true'
+            - name: FLAME_BOOTSTRAP_TLS_SECRET
+              value: flame-webhook-tls
+          image: ghcr.io/eigr-labs/flame-k8s-controller:dev-local
           name: init-certificates
+          volumeMounts:
+            - mountPath: /app/.cache/bakeware/
+              name: bakeware-cache
       serviceAccountName: flame-controller
       volumes:
+        - emptyDir: {}
+          name: bakeware-cache
         - name: certs
           secret:
             optional: true
-            secretName: tls-certs
+            secretName: flame-webhook-tls

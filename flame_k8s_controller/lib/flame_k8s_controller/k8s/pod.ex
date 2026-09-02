@@ -42,7 +42,6 @@ defmodule FlameK8sController.K8s.Pod do
       |> Map.put("containers", [container])
       |> Map.put("restartPolicy", "Never")
       |> Map.put("terminationGracePeriodSeconds", termination_grace_period_seconds)
-      |> maybe_add_owner_reference(parent_ref)
 
     # Add FLAME-specific labels
     pod_labels =
@@ -63,6 +62,38 @@ defmodule FlameK8sController.K8s.Pod do
       "spec" => pod_spec
     }
   end
+
+  @doc """
+  Validates container resource consistency.
+
+  Ensures CPU and memory requests do not exceed their corresponding limits
+  when both values are provided.
+  """
+  @spec validate_resources(map()) :: :ok | {:error, binary()}
+  def validate_resources(container) when is_map(container) do
+    resources = Map.get(container, "resources", %{}) || %{}
+    requests = Map.get(resources, "requests", %{}) || %{}
+    limits = Map.get(resources, "limits", %{}) || %{}
+
+    with :ok <-
+           validate_request_vs_limit(
+             "cpu",
+             Map.get(requests, "cpu"),
+             Map.get(limits, "cpu"),
+             &parse_cpu_millicores/1
+           ),
+         :ok <-
+           validate_request_vs_limit(
+             "memory",
+             Map.get(requests, "memory"),
+             Map.get(limits, "memory"),
+             &parse_memory_bytes/1
+           ) do
+      :ok
+    end
+  end
+
+  def validate_resources(_), do: {:error, "container must be an object"}
 
   defp get_pool_template(pool_config) do
     get_in(pool_config, ["spec", "podTemplate"]) || %{"spec" => %{}}
@@ -90,7 +121,7 @@ defmodule FlameK8sController.K8s.Pod do
       end
 
     # Build FLAME-specific environment variables
-    flame_env = build_flame_env(parent_ref)
+    flame_env = build_flame_env(parent_ref, runner_spec)
 
     # Merge environment variables
     pool_env = Map.get(base_container, "env", [])
@@ -113,9 +144,12 @@ defmodule FlameK8sController.K8s.Pod do
     |> Map.put("imagePullPolicy", "IfNotPresent")
   end
 
-  defp build_flame_env(parent_ref) do
+  defp build_flame_env(parent_ref, runner_spec) do
     parent_name = Map.get(parent_ref, "name") || Map.get(parent_ref, :name)
     parent_namespace = Map.get(parent_ref, "namespace") || Map.get(parent_ref, :namespace)
+    cookie_secret_ref =
+      Map.get(runner_spec, "cookieSecretRef") || Map.get(runner_spec, :cookieSecretRef) ||
+        "flame-erlang-cookie"
 
     [
       %{
@@ -137,28 +171,96 @@ defmodule FlameK8sController.K8s.Pod do
       %{
         "name" => "POD_IP",
         "valueFrom" => %{"fieldRef" => %{"fieldPath" => "status.podIP"}}
+      },
+      %{
+        "name" => "RELEASE_COOKIE",
+        "valueFrom" => %{
+          "secretKeyRef" => %{
+            "name" => cookie_secret_ref,
+            "key" => "cookie"
+          }
+        }
       }
     ]
   end
 
-  defp maybe_add_owner_reference(pod_spec, parent_ref) do
-    parent_uid = Map.get(parent_ref, "uid") || Map.get(parent_ref, :uid)
+  defp validate_request_vs_limit(_resource_name, nil, _limit, _parser), do: :ok
+  defp validate_request_vs_limit(_resource_name, _request, nil, _parser), do: :ok
 
-    if parent_uid do
-      owner_references = [
-        %{
-          "apiVersion" => "v1",
-          "kind" => "Pod",
-          "name" => Map.get(parent_ref, "name") || Map.get(parent_ref, :name),
-          "uid" => parent_uid,
-          "controller" => false,
-          "blockOwnerDeletion" => false
-        }
-      ]
-
-      Map.put(pod_spec, "ownerReferences", owner_references)
+  defp validate_request_vs_limit(resource_name, request, limit, parser) do
+    with {:ok, request_value} <- parser.(request),
+         {:ok, limit_value} <- parser.(limit) do
+      if request_value <= limit_value do
+        :ok
+      else
+        {:error,
+         "requests.#{resource_name} (#{request}) must be less than or equal to limits.#{resource_name} (#{limit})"}
+      end
     else
-      pod_spec
+      :error ->
+        {:error,
+         "unable to parse resource quantity for #{resource_name}: request=#{inspect(request)} limit=#{inspect(limit)}"}
     end
   end
+
+  defp parse_cpu_millicores(value) when is_integer(value), do: {:ok, value * 1000}
+  defp parse_cpu_millicores(value) when is_float(value), do: {:ok, trunc(value * 1000)}
+
+  defp parse_cpu_millicores(value) when is_binary(value) do
+    normalized = String.trim(value)
+
+    if String.ends_with?(normalized, "m") do
+      milli = String.trim_trailing(normalized, "m")
+
+      case Integer.parse(milli) do
+        {parsed, ""} -> {:ok, parsed}
+        _ -> :error
+      end
+    else
+      case Float.parse(normalized) do
+        {parsed, ""} -> {:ok, trunc(parsed * 1000)}
+        _ -> :error
+      end
+    end
+  end
+
+  defp parse_cpu_millicores(_), do: :error
+
+  defp parse_memory_bytes(value) when is_integer(value), do: {:ok, value}
+  defp parse_memory_bytes(value) when is_float(value), do: {:ok, trunc(value)}
+
+  defp parse_memory_bytes(value) when is_binary(value) do
+    normalized = String.trim(value)
+
+    case Regex.run(~r/^([0-9]+(?:\.[0-9]+)?)([KMGTEP]i|[kMGTPE]|)?$/, normalized) do
+      [_, num, unit] ->
+        with {number, ""} <- Float.parse(num),
+             {:ok, multiplier} <- memory_multiplier(unit) do
+          {:ok, trunc(number * multiplier)}
+        else
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp parse_memory_bytes(_), do: :error
+
+  defp memory_multiplier(""), do: {:ok, 1}
+  defp memory_multiplier("k"), do: {:ok, 1_000}
+  defp memory_multiplier("M"), do: {:ok, 1_000_000}
+  defp memory_multiplier("G"), do: {:ok, 1_000_000_000}
+  defp memory_multiplier("T"), do: {:ok, 1_000_000_000_000}
+  defp memory_multiplier("P"), do: {:ok, 1_000_000_000_000_000}
+  defp memory_multiplier("E"), do: {:ok, 1_000_000_000_000_000_000}
+  defp memory_multiplier("Ki"), do: {:ok, 1_024}
+  defp memory_multiplier("Mi"), do: {:ok, 1_048_576}
+  defp memory_multiplier("Gi"), do: {:ok, 1_073_741_824}
+  defp memory_multiplier("Ti"), do: {:ok, 1_099_511_627_776}
+  defp memory_multiplier("Pi"), do: {:ok, 1_125_899_906_842_624}
+  defp memory_multiplier("Ei"), do: {:ok, 1_152_921_504_606_846_976}
+  defp memory_multiplier(_), do: :error
+
 end

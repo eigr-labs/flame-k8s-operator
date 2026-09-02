@@ -56,14 +56,33 @@ make generate-k8s-manifests
 kubectl apply -k .k8s/install/manifests
 ```
 
+## Generate A FLAME-Ready Deployment
+
+The library includes a mix task that generates a Deployment with the FLAME
+annotations already filled in.
+
+```bash
+mix flame.gen.deployment \
+  --name flame-parent-example \
+  --namespace default \
+  --image ghcr.io/eigr-labs/flame-parent-example:latest
+```
+
+Optional flags include `--pool-config-ref`, `--otp-app`, `--cookie-secret-ref`,
+and `--runner-termination-timeout`.
+
 ## Apply Example CR Instances
 
 After installing the operator, apply example resources:
 
 ```bash
 kubectl apply -f examples/crds/flamepool-apply.yaml
-kubectl apply -f examples/crds/flamerunner-apply.yaml
+kubectl apply -f examples/flame_example/.k8s/deployment.yaml
 ```
+
+The direct `FlameRunner` manifest is still available for manual CR testing, but
+the normal application flow is driven by the annotated Deployment and the
+mutating webhook.
 
 Inspect status:
 

@@ -48,6 +48,10 @@ spec:
             spec:
               description: Specification of the FlameRunner
               properties:
+                cookieSecretRef:
+                  default: flame-erlang-cookie
+                  description: Name of the Kubernetes Secret in the runner namespace that stores the Erlang distribution cookie
+                  type: string
                 env:
                   description: Additional environment variables for the runner
                   items:
@@ -92,15 +96,11 @@ spec:
                   properties:
                     limits:
                       additionalProperties:
-                        anyOf:
-                          - type: string
-                          - type: integer
+                        type: string
                       type: object
                     requests:
                       additionalProperties:
-                        anyOf:
-                          - type: string
-                          - type: integer
+                        type: string
                       type: object
                   type: object
                 terminationGracePeriodSeconds:
@@ -160,6 +160,7 @@ spec:
                 phase:
                   description: Current phase of the runner pod
                   enum:
+                    - NotProvisioned
                     - Pending
                     - Running
                     - Succeeded
@@ -179,7 +180,7 @@ spec:
                   description: Machine-readable reason for the current phase
                   type: string
                 retryCount:
-                  description: Number of consecutive reconciliation retries while waiting for the pod
+                  description: Number of consecutive reconciliation retries while waiting for the pod to be provisioned
                   minimum: 0
                   type: integer
                 startTime:
