@@ -11,6 +11,8 @@ spec:
       app: flame-parent-example
   template:
     metadata:
+      labels:
+        app: flame-parent-example
       annotations:
         flame.org/enabled: "true"
         flame.org/dist-auto-config: "true"

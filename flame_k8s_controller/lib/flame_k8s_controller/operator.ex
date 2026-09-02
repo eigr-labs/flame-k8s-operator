@@ -7,7 +7,7 @@ defmodule FlameK8sController.Operator do
   processes.
   """
 
-  use Bonny.Operator, default_watch_namespace: "default"
+  use Bonny.Operator, default_watch_namespace: :all
 
   step(Bonny.Pluggable.Logger, level: :info)
   step(:delegate_to_controller)

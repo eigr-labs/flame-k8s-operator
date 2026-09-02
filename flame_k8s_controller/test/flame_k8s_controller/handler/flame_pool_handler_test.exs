@@ -32,6 +32,51 @@ defmodule FlameK8sController.Handler.FlamePoolHandlerTest do
       assert Enum.any?(result.status["conditions"], &(&1["type"] == "TemplateValid" and &1["status"] == "False"))
       assert length(result.events) == 1
     end
+
+    test "marks pool as invalid when container requests exceed limits" do
+      invalid_resource =
+        valid_pool_resource()
+        |> put_in(
+          ["spec", "podTemplate", "spec", "containers", Access.at(0), "resources"],
+          %{
+            "requests" => %{"cpu" => "300m", "memory" => "512Mi"},
+            "limits" => %{"cpu" => "200m", "memory" => "256Mi"}
+          }
+        )
+
+      axn = base_axn(invalid_resource, :modify)
+      result = FlamePoolHandler.call(axn, nil)
+
+      assert result.status["phase"] == "Invalid"
+      assert result.status["reason"] == "ConfigurationInvalid"
+      assert result.status["message"] =~ "Invalid resources in podTemplate.spec.containers[0]"
+      assert result.status["message"] =~ "requests.cpu"
+    end
+  end
+
+  describe "sanitize_conditions/1" do
+    test "keeps only schema-supported condition fields" do
+      input = [
+        %{
+          "type" => "Ready",
+          "status" => "True",
+          "lastTransitionTime" => "2026-09-02T00:00:00Z",
+          "reason" => "Ok",
+          "message" => "all good",
+          "observedGeneration" => 1,
+          "lastProbeTime" => "2026-09-02T00:00:00Z"
+        }
+      ]
+
+      assert [condition] = FlamePoolHandler.sanitize_conditions(input)
+      assert condition["type"] == "Ready"
+      assert condition["status"] == "True"
+      assert condition["lastTransitionTime"] == "2026-09-02T00:00:00Z"
+      assert condition["reason"] == "Ok"
+      assert condition["message"] == "all good"
+      refute Map.has_key?(condition, "observedGeneration")
+      refute Map.has_key?(condition, "lastProbeTime")
+    end
   end
 
   defp base_axn(resource, action) do

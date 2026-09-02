@@ -105,7 +105,10 @@ jobs:
 
       - name: Pack manifests
         run: |
-          tar -czf flame-k8s-manifests-${{ github.ref_name }}.tar.gz -C .k8s/install manifests
+          tar -czf flame-k8s-manifests-${{ github.ref_name }}.tar.gz \
+            .k8s/install/manifests \
+            scripts/install-operator.sh \
+            scripts/ensure-flame-cookie-secret.sh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -114,3 +117,5 @@ jobs:
           files: |
             flame-k8s-manifests-${{ github.ref_name }}.tar.gz
             .k8s/install/manifests/*.yaml
+            scripts/install-operator.sh
+            scripts/ensure-flame-cookie-secret.sh

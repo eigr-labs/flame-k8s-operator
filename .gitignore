@@ -24,3 +24,5 @@ flame_k8s-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+.vscode/*

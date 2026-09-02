@@ -40,6 +40,34 @@ defmodule FLAME.K8sBackendTest do
     end
   end
 
+  describe "sanitize_init_opts/1" do
+    test "drops unrelated options and keeps backend settings" do
+      assert [boot_timeout: 1_234, log: :debug] =
+               K8sBackend.sanitize_init_opts(
+                 terminator_sup: :ignored,
+                 boot_timeout: 1_234,
+                 log: :debug
+               )
+    end
+  end
+
+  describe "encode_parent/4" do
+    test "encodes parent payload with node_base and host_env" do
+      encoded = K8sBackend.encode_parent(make_ref(), self(), "flame_example", "POD_IP")
+
+      decoded =
+        encoded
+        |> Base.decode64!()
+        |> :erlang.binary_to_term()
+
+      assert is_reference(decoded.ref)
+      assert is_pid(decoded.pid)
+      assert decoded.backend == FLAME.K8sBackend
+      assert decoded.node_base == "flame_example"
+      assert decoded.host_env == "POD_IP"
+    end
+  end
+
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
 end

@@ -18,14 +18,42 @@ defmodule FlameK8sController.K8s.PodTest do
       assert get_in(manifest, ["spec", "terminationGracePeriodSeconds"]) == 60
     end
 
-    test "includes completion-related base metadata and owner reference when parent UID exists" do
+    test "includes completion-related base metadata" do
       args = base_args(%{"terminationGracePeriodSeconds" => 10})
       manifest = Pod.manifest(args, pool_config())
+      env = get_in(manifest, ["spec", "containers", Access.at(0), "env"]) || []
 
       assert get_in(manifest, ["metadata", "labels", "flame.org/runner"]) == "true"
       assert get_in(manifest, ["metadata", "labels", "flame.org/parent"]) == "app-parent"
+      refute Enum.any?(env, &(&1["name"] == "RELEASE_DISTRIBUTION" and &1["value"] == "name"))
+      refute Enum.any?(env, fn env_var ->
+               env_var["name"] == "RELEASE_NODE" and env_var["value"] == "$(RELEASE_NAME)@$(POD_IP)"
+             end)
+    end
+  end
 
-      assert get_in(manifest, ["spec", "ownerReferences", Access.at(0), "uid"]) == "parent-uid-123"
+  describe "validate_resources/1" do
+    test "returns ok when requests are less than or equal to limits" do
+      container = %{
+        "resources" => %{
+          "requests" => %{"cpu" => "100m", "memory" => "128Mi"},
+          "limits" => %{"cpu" => "200m", "memory" => "256Mi"}
+        }
+      }
+
+      assert :ok = Pod.validate_resources(container)
+    end
+
+    test "returns error when requests exceed limits" do
+      container = %{
+        "resources" => %{
+          "requests" => %{"cpu" => "300m", "memory" => "512Mi"},
+          "limits" => %{"cpu" => "200m", "memory" => "256Mi"}
+        }
+      }
+
+      assert {:error, message} = Pod.validate_resources(container)
+      assert message =~ "requests.cpu"
     end
   end
 

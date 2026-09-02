@@ -9,6 +9,7 @@ backend and the `flame_k8s_controller` operator in Kubernetes.
 - How Kubernetes annotations trigger runner orchestration
 - How to install the operator in a cluster
 - How to apply Flame CRDs and CR instances
+- How the example application actually calls `FLAME.call/3` on startup
 
 ## How The Library Is Used In The Example App
 
@@ -37,6 +38,11 @@ pod template annotations enable FLAME behavior:
 
 These annotations are consumed by the operator webhook/controller so FLAME
 runners are created with the selected pool profile.
+
+The example application also starts a small `FLAME.Pool` and a demo worker that
+calls `FLAME.call/3` on boot. That makes the local example exercise the full
+parent -> backend -> operator -> runner path instead of just compiling the
+integration code.
 
 ## Prerequisites
 
@@ -74,12 +80,16 @@ This installs:
 
 ## Apply Flame CRDs (Custom Resources)
 
-After the operator is installed, apply the example CR instances from root:
+After the operator is installed, apply the example pool and annotated Deployment
+from this folder. The operator now creates the workload service account and RBAC
+automatically when the Deployment is admitted:
 
 ```bash
-kubectl apply -f examples/crds/flamepool-apply.yaml
-kubectl apply -f examples/crds/flamerunner-apply.yaml
+kubectl apply -f examples/flame_example/.k8s/pool.yaml
+kubectl apply -f examples/flame_example/.k8s/deployment.yaml
 ```
+
+That is the real flow. The `FlameRunner` CR should be created by the webhook/backend path after the application calls `FLAME.call/3`, not by applying a runner manifest directly.
 
 To inspect:
 
@@ -91,11 +101,6 @@ kubectl get flamerunners -A
 ## Run The Example Workload Manifests
 
 You can also apply the app-specific manifests under this folder:
-
-```bash
-kubectl apply -f examples/flame_example/.k8s/pool.yaml
-kubectl apply -f examples/flame_example/.k8s/deployment.yaml
-```
 
 Or run the local helper in this directory:
 

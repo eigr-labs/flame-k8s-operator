@@ -12,8 +12,34 @@ This project follows Bonny reconciliation patterns:
 - Input manifests (`kubectl apply`) should include only `metadata` and `spec`.
 - `status` is controller-managed via `Bonny.Pluggable.ApplyStatus`.
 - `metadata.finalizers` are controller-managed via `Bonny.Pluggable.Finalizer`.
+- Erlang distribution cookies must be provided once in the operator namespace via a Kubernetes Secret.
+- The operator watches all namespaces by default.
 
 Do not set `status` or `finalizers` manually in your apply manifests.
+
+### Install-Time Cookie Secret
+
+The operator manifests do not ship with a static Erlang cookie Secret.
+
+- Create or reuse `flame-erlang-cookie` in the operator namespace during installation.
+- The operator replicates that Secret into FLAME workload namespaces on demand.
+
+Helper scripts are provided at repository root:
+
+- [scripts/install-operator.sh](../scripts/install-operator.sh)
+- [scripts/ensure-flame-cookie-secret.sh](../scripts/ensure-flame-cookie-secret.sh)
+
+Example:
+
+```bash
+bash scripts/install-operator.sh --manifest-dir .k8s/install/manifests --namespace flame
+```
+
+Release/tag based install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eigr-labs/flame-k8s-operator/v0.1.0/scripts/install-operator.sh | bash -s -- --tag v0.1.0 --namespace flame
+```
 
 ### Apply Manifests (User Input)
 
@@ -22,12 +48,14 @@ Do not set `status` or `finalizers` manually in your apply manifests.
 
 ### Real Cluster Flow
 
-1. Apply pool: `kubectl apply -f examples/crds/flamepool-apply.yaml`
-2. Apply runner: `kubectl apply -f examples/crds/flamerunner-apply.yaml`
-3. Observe status: `kubectl get runners -n flame -o yaml`
-4. Delete runner and watch finalizer lifecycle:
-: `kubectl delete runner runner-example-001 -n flame`
-: `kubectl get runner runner-example-001 -n flame -o yaml`
+1. Apply pool: `kubectl apply -f examples/flame_example/.k8s/pool.yaml`
+2. Apply annotated Deployment: `kubectl apply -f examples/flame_example/.k8s/deployment.yaml`
+3. Observe the generated runner: `kubectl get flamerunners -n default -l flame.org/parent=flame-parent-example -o yaml`
+4. Delete the Deployment and watch finalizer lifecycle on the generated runner:
+: `kubectl delete deployment flame-parent-example -n default`
+: `kubectl get flamerunner -n default -o yaml`
+
+The runner manifest in [examples/crds/flamerunner-apply.yaml](../examples/crds/flamerunner-apply.yaml) is still useful for direct CR testing, but it is not part of the real application flow.
 
 Bonny finalizer flow in this project:
 
@@ -45,10 +73,10 @@ Spec highlights:
 
 Status highlights:
 
-- `phase`: `Pending | Running | Succeeded | Failed | Terminating`
+- `phase`: `NotProvisioned | Pending | Running | Succeeded | Failed | Terminating`
 - `reason`, `message`, `lastUpdateTime`
 - `podName`, `podIP`, `startTime`, `completionTime`
-- `retryCount` for reconcile retries when pod lookup fails
+- `retryCount` for reconcile retries while the pod is still being provisioned
 - `poolRef`, `poolNamespace`, `fallbackPoolUsed`
 - `conditions`
 
@@ -56,8 +84,10 @@ Lifecycle behavior:
 
 - On create/modify, the controller resolves `poolRef` and creates a pod descendant.
 - If pool resolution fails, it uses a minimal fallback template and sets `fallbackPoolUsed`.
+- Before a runner pod exists, the controller keeps `phase` at `NotProvisioned`.
 - On reconcile, pod status is mirrored into FlameRunner status.
-- If pod cannot be found repeatedly, retries are counted and eventually phase becomes `Failed`.
+- If the pod is not found yet, retries are counted but the runner remains `NotProvisioned`.
+- Only terminal reconcile errors transition the runner to `Failed`.
 - During deletion, phase is set to `Terminating` and finalizer cleanup removes the runner pod.
 
 ### FlamePool
@@ -96,6 +126,12 @@ The mutating admission handler supports:
 
 When `flame.org/enabled: "true"` is present on pod template annotations, the
 handler appends FLAME runtime env vars to the first container.
+
+Optional annotation:
+
+- `flame.org/cookie-secret-ref`: overrides the default secret name `flame-erlang-cookie`
+
+The operator will ensure that the referenced Secret exists in the workload namespace before admitting the workload or creating runner pods.
 
 ## Testing
 

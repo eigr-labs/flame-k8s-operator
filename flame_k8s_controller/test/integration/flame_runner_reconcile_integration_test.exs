@@ -42,7 +42,7 @@ defmodule FlameK8sController.Integration.FlameRunnerReconcileTest do
 
         add_result = FlameRunnerHandler.call(add_axn, nil)
 
-        assert add_result.status["phase"] == "Pending"
+        assert add_result.status["phase"] == "NotProvisioned"
         assert map_size(add_result.descendants) == 1
 
         {_, {_, pod_manifest}} = Enum.at(add_result.descendants, 0)

@@ -4,20 +4,20 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
   """
   use K8sWebhoox.AdmissionControl.Handler
 
+  alias FlameK8sController.K8s.CookieSecret
+  alias FlameK8sController.K8s.WorkloadAccess
   alias K8sWebhoox.Conn
+
+  require Logger
 
   import K8sWebhoox.AdmissionControl.AdmissionReview
 
   mutate "apps/v1/deployments", conn do
-    conn
-    |> maybe_patch_workload()
-    |> allow()
+    admit_workload(conn)
   end
 
   mutate "apps/v1/statefulsets", conn do
-    conn
-    |> maybe_patch_workload()
-    |> allow()
+    admit_workload(conn)
   end
 
   defp is_flame_enabled?(metadata) do
@@ -28,6 +28,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
   defp patch_obj(spec, metadata) do
     annotations = Map.get(metadata, "annotations", %{})
     pool_cfg_ref = Map.get(annotations, "flame.org/pool-config-ref", "default-pool")
+    cookie_secret_ref = cookie_secret_ref(metadata)
 
     timeout_to_shoot_headhead =
       Map.get(annotations, "flame.org/runner-termination-timeout", 60000)
@@ -35,6 +36,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
 
     template = Map.get(spec, "template", %{})
     pod_spec = Map.get(template, "spec", %{})
+    service_account_name = workload_service_account_name(pod_spec)
 
     container =
       pod_spec
@@ -57,10 +59,31 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
           "valueFrom" => %{"fieldRef" => %{"fieldPath" => "metadata.namespace"}}
         },
         %{"name" => "POD_IP", "valueFrom" => %{"fieldRef" => %{"fieldPath" => "status.podIP"}}},
+        %{
+          "name" => "RELEASE_COOKIE",
+          "valueFrom" => %{
+            "secretKeyRef" => %{
+              "name" => cookie_secret_ref,
+              "key" => "cookie"
+            }
+          }
+        },
+        %{"name" => "FLAME_COOKIE_SECRET_REF", "value" => cookie_secret_ref},
         %{"name" => "POD_TERMINATION_TIMEOUT", "value" => timeout_to_shoot_headhead},
         %{"name" => "FLAME_POOL_CONFIG_REF", "value" => pool_cfg_ref}
       ]
       |> maybe_put_distribution(annotations)
+
+    service_account_patch =
+      if Map.get(pod_spec, "serviceAccountName") || Map.get(pod_spec, :serviceAccountName) do
+        nil
+      else
+        %{
+          "op" => "add",
+          "path" => "/spec/template/spec/serviceAccountName",
+          "value" => service_account_name
+        }
+      end
 
     updated_envs =
       case container do
@@ -85,32 +108,67 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
           end
       end
 
-    case updated_envs do
-      nil ->
+    patches = Enum.filter([service_account_patch, updated_envs], &(!is_nil(&1)))
+
+    case patches do
+      [] ->
         nil
 
-      patch ->
-        [patch]
+      _ ->
+        patches
         |> Jason.encode!()
         |> Base.encode64()
     end
   end
 
-  defp maybe_patch_workload(%Conn{request: request} = conn) do
+  defp admit_workload(%Conn{request: request} = conn) do
     spec = get_in(request, ["object", "spec"]) || %{}
     metadata = get_in(spec, ["template", "metadata"]) || %{}
+    namespace = workload_namespace(request)
+
+    Logger.warning("Handling FLAME webhook admission",
+      resource: get_in(request, ["resource", "resource"]),
+      namespace: namespace,
+      flame_enabled: is_flame_enabled?(metadata)
+    )
 
     if is_flame_enabled?(metadata) do
-      case patch_obj(spec, metadata) do
-        nil ->
-          conn
+       service_account_name = workload_service_account_name(get_in(spec, ["template", "spec"]) || %{})
 
-        patch ->
-          create_patch(conn, patch)
+       with :ok <- CookieSecret.ensure_namespace_secret(namespace, cookie_secret_ref(metadata)),
+         :ok <- WorkloadAccess.ensure_namespace_access(namespace, service_account_name),
+           patch when not is_nil(patch) <- patch_obj(spec, metadata) do
+        Logger.warning("Generated FLAME mutating patch", namespace: namespace)
+
+        conn
+        |> create_patch(patch)
+        |> allow()
+      else
+        nil ->
+          allow(conn)
+
+        {:error, reason} ->
+          deny(conn, 500, reason)
       end
     else
-      conn
+      allow(conn)
     end
+  end
+
+  defp cookie_secret_ref(metadata) do
+    metadata
+    |> Map.get("annotations", %{})
+    |> Map.get("flame.org/cookie-secret-ref", "flame-erlang-cookie")
+  end
+
+  defp workload_namespace(request) do
+    request["namespace"] || get_in(request, ["object", "metadata", "namespace"]) || "default"
+  end
+
+  defp workload_service_account_name(pod_spec) do
+    Map.get(pod_spec, "serviceAccountName") ||
+      Map.get(pod_spec, :serviceAccountName) ||
+      WorkloadAccess.default_service_account_name()
   end
 
   defp create_patch(conn, patch_obj) do
@@ -126,7 +184,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
   end
 
   defp maybe_put_distribution(envs, annotations) do
-    auto_dist? = Map.get(annotations, "flame.org/dist-auto-config", "false") |> to_bool()
+    auto_dist? = Map.get(annotations, "flame.org/dist-auto-config", "true") |> to_bool()
 
     updated_envs =
       if auto_dist? do

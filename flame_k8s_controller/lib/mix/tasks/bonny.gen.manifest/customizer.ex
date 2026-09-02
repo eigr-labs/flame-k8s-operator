@@ -39,9 +39,20 @@ defmodule Mix.Tasks.Bonny.Gen.Manifest.FlameK8sControllerCustomizer do
 
     resource
     |> update_in(
+      [
+        "spec",
+        "template",
+        "spec",
+        "containers",
+        Access.filter(&(&1["name"] == "flame-controller")),
+        Access.key("env", [])
+      ],
+      &(&1 ++ [release_cookie_env()])
+    )
+    |> update_in(
       ["spec", "template", "spec", Access.key("volumes", [])],
       &[
-        %{"name" => "certs", "secret" => %{"secretName" => "tls-certs", "optional" => true}}
+        %{"name" => "certs", "secret" => %{"secretName" => "flame-webhook-tls", "optional" => true}}
         | &1
       ]
     )
@@ -73,16 +84,40 @@ defmodule Mix.Tasks.Bonny.Gen.Manifest.FlameK8sControllerCustomizer do
         "spec",
         "template",
         "spec",
+        "containers",
+        Access.all(),
+        Access.key("volumeMounts", [])
+      ],
+      fn volume_mounts ->
+        [%{"name" => "bakeware-cache", "mountPath" => "/app/.cache/bakeware/"} | volume_mounts]
+      end
+    )
+    |> update_in(
+      [
+        "spec",
+        "template",
+        "spec",
         Access.key("initContainers", [])
       ],
       fn init_containers ->
         certs = %{
           "name" => "init-certificates",
           "image" => image,
-          "args" => ["eval", ~s|FlameK8sController.Webhooks.bootstrap_tls(:prod, "tls-certs")|]
+          "env" => [release_cookie_env()]
+          |> Kernel.++([
+            %{"name" => "FLAME_BOOTSTRAP_TLS_ONLY", "value" => "true"},
+            %{"name" => "FLAME_BOOTSTRAP_TLS_SECRET", "value" => "flame-webhook-tls"}
+          ]),
+          "volumeMounts" => [%{"name" => "bakeware-cache", "mountPath" => "/app/.cache/bakeware/"}]
         }
 
         [certs | init_containers]
+      end
+    )
+    |> update_in(
+      ["spec", "template", "spec", Access.key("volumes", [])],
+      fn volumes ->
+        [%{"name" => "bakeware-cache", "emptyDir" => %{}} | volumes]
       end
     )
     |> put_in(
@@ -138,6 +173,18 @@ defmodule Mix.Tasks.Bonny.Gen.Manifest.FlameK8sControllerCustomizer do
         end)
         |> Map.new()
     end)
+  end
+
+  defp release_cookie_env do
+    %{
+      "name" => "RELEASE_COOKIE",
+      "valueFrom" => %{
+        "secretKeyRef" => %{
+          "name" => "flame-erlang-cookie",
+          "key" => "cookie"
+        }
+      }
+    }
   end
 
   # fallback

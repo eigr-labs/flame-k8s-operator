@@ -26,3 +26,5 @@ webhooks:
         resources:
           - deployments
           - statefulsets
+    sideEffects: None
+    timeoutSeconds: 10
