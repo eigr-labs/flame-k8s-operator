@@ -16,6 +16,8 @@ defmodule FlameK8sController.Controller.FlamePool do
     [
       to_rbac_rule({"", "secrets", "*"}),
       to_rbac_rule({"", ["services", "configmaps"], "*"}),
+      to_rbac_rule({"", ["nodes"], ["get", "list"]}),
+      to_rbac_rule({"scheduling.k8s.io", ["priorityclasses"], ["get", "list", "create"]}),
       to_rbac_rule({"flame.org", ["flamerunners"], ["get", "list"]})
     ]
   end

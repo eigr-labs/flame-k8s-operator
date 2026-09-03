@@ -5,6 +5,12 @@ metadata:
   name: custom-pool-example
   namespace: default
 spec:
+  scheduling:
+    provider: karpenter
+    class: gpu
+    lifecycle: spot
+    architecture: amd64
+    priority: high
   podTemplate:
     spec:
       containers:

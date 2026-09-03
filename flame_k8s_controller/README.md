@@ -97,12 +97,49 @@ Spec highlights:
 - `spec.podTemplate.spec.containers` must be a non-empty list.
 - Each container entry must be an object.
 - If container `env` is present, each env entry must be an object with non-empty `name`.
+- Optional `spec.scheduling` can express high-level scheduling intent:
+  - `provider`: `generic | karpenter`
+  - `class`: `general | cpu | memory | gpu`
+  - `lifecycle`: `any | on-demand | spot`
+  - `architecture`: `any | amd64 | arm64`
+  - `priority`: `low | normal | high | critical`
 
 Status highlights:
 
 - `phase`: `Ready | Invalid`
 - `reason`, `message`, `lastUpdateTime`
 - `conditions` include `Ready` and `TemplateValid`
+- `resolvedScheduling` shows how `spec.scheduling` was translated
+- `schedulingFeedback` reports infrastructure matching feedback
+- `kubectl get flamepools` includes `InfraReady` and `MatchingNodes` columns
+
+Scheduling feedback conditions:
+
+- `SchedulingResolved`: translation from high-level intent to PodSpec defaults
+- `SchedulingInfrastructure`: whether current node labels match generated selectors
+
+Current mapping conventions:
+
+- `class` -> `nodeSelector["flame.org/runner-class"]` (cluster label convention)
+- `lifecycle` -> by provider:
+  - `generic`: `nodeSelector["flame.org/capacity-type"]`
+  - `karpenter`: `nodeSelector["karpenter.sh/capacity-type"]`
+- `architecture` -> `nodeSelector["kubernetes.io/arch"]` (Kubernetes standard)
+- `priority` -> `priorityClassName` (`flame-low|flame-normal|flame-high|flame-critical`)
+
+PriorityClass bootstrap behavior:
+
+- When one of the built-in flame priorities is selected, the operator reconciles
+  the corresponding `PriorityClass` with create-if-not-exists semantics.
+- This removes the need to pre-create `flame-low`, `flame-normal`,
+  `flame-high`, or `flame-critical` manually in the cluster.
+
+If your cluster uses different labels/taints, use `spec.podTemplate.spec` for explicit scheduling control.
+
+`status.schedulingFeedback` includes:
+
+- `matchingNodes`: number of matching nodes
+- `matchingNodesNames`: bracketed list used by list column (example: `[node-x,node-y,node-z,...]`)
 
 Deletion behavior:
 

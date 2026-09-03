@@ -23,6 +23,38 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
               required: [:podTemplate],
               description: "Specification of the FlamePool configuration",
               properties: %{
+                scheduling: %{
+                  type: :object,
+                  description:
+                    "Optional high-level scheduling intent translated by the operator into Kubernetes pod scheduling fields.",
+                  properties: %{
+                    provider: %{
+                      type: :string,
+                      enum: ["generic", "karpenter"],
+                      description: "Mapping provider used to translate scheduling lifecycle constraints"
+                    },
+                    class: %{
+                      type: :string,
+                      enum: ["general", "cpu", "memory", "gpu"],
+                      description: "Workload class abstraction for runner placement"
+                    },
+                    lifecycle: %{
+                      type: :string,
+                      enum: ["any", "on-demand", "spot"],
+                      description: "Capacity lifecycle preference"
+                    },
+                    architecture: %{
+                      type: :string,
+                      enum: ["any", "amd64", "arm64"],
+                      description: "CPU architecture preference"
+                    },
+                    priority: %{
+                      type: :string,
+                      enum: ["low", "normal", "high", "critical"],
+                      description: "Priority abstraction mapped to priorityClassName"
+                    }
+                  }
+                },
                 podTemplate: %{
                   type: :object,
                   description:
@@ -78,6 +110,30 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
                   type: :string,
                   description: "Human-readable message about the current phase"
                 },
+                resolvedScheduling: %{
+                  type: :object,
+                  description: "Operator-resolved scheduling translation from spec.scheduling to PodSpec",
+                  "x-kubernetes-preserve-unknown-fields": true
+                },
+                schedulingFeedback: %{
+                  type: :object,
+                  description: "Infrastructure feedback for resolved scheduling selectors",
+                  properties: %{
+                    infraReady: %{
+                      type: :string,
+                      enum: ["True", "False", "Unknown"]
+                    },
+                    matchingNodes: %{
+                      type: :integer
+                    },
+                    matchingNodesNames: %{
+                      type: :string
+                    },
+                    message: %{
+                      type: :string
+                    }
+                  }
+                },
                 lastUpdateTime: %{
                   type: :string,
                   format: "date-time",
@@ -126,6 +182,18 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
           type: :string,
           jsonPath: ".status.phase",
           description: "Current semantic validation phase"
+        },
+        %{
+          name: "InfraReady",
+          type: :string,
+          jsonPath: ".status.schedulingFeedback.infraReady",
+          description: "Whether cluster nodes currently match resolved scheduling selectors"
+        },
+        %{
+          name: "MatchingNodes",
+          type: :string,
+          jsonPath: ".status.schedulingFeedback.matchingNodesNames",
+          description: "Comma-separated node names matching resolved scheduling selectors"
         },
         %{
           name: "Age",

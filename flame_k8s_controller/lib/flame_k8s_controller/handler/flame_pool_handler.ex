@@ -42,6 +42,7 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
 
   @behaviour Pluggable
   @finalizer_id "flame.org/flamepool-protection"
+  @max_matching_node_names 3
 
   def finalizer_id, do: @finalizer_id
 
@@ -81,40 +82,113 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
 
   @impl Pluggable
   def call(%Bonny.Axn{action: action} = axn, nil) when action in [:add, :modify] do
-    %Bonny.Axn{resource: resource} = axn
+    %Bonny.Axn{resource: resource, conn: conn} = axn
 
     case validate_pool_config(resource) do
       :ok ->
-        conditions =
-          sanitize_conditions([
-            %{
-              "type" => "Ready",
-              "status" => "True",
-              "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-              "reason" => "ConfigurationValid",
-              "message" => "FlamePool configuration is valid"
-            },
-            %{
-              "type" => "TemplateValid",
-              "status" => "True",
-              "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-              "reason" => "TemplateAccepted",
-              "message" => "Pod template passed semantic validation"
-            }
-          ])
+        resolved_scheduling = Pod.resolved_scheduling(resource)
 
-        axn
-        |> Bonny.Axn.update_status(fn _current_status ->
-          %{
-            "observedGeneration" => get_in(resource, ["metadata", "generation"]) || 1,
-            "phase" => "Ready",
-            "reason" => "ConfigurationValid",
-            "message" => "FlamePool configuration is valid",
-            "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
-            "conditions" => conditions
-          }
-        end)
-        |> Bonny.Axn.success_event()
+        with :ok <- ensure_priority_class_for_pool(conn, resolved_scheduling) do
+          scheduling_feedback = evaluate_scheduling_feedback(conn, resolved_scheduling)
+
+          conditions =
+            sanitize_conditions([
+              %{
+                "type" => "Ready",
+                "status" => "True",
+                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                "reason" => "ConfigurationValid",
+                "message" => "FlamePool configuration is valid"
+              },
+              %{
+                "type" => "TemplateValid",
+                "status" => "True",
+                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                "reason" => "TemplateAccepted",
+                "message" => "Pod template passed semantic validation"
+              },
+              %{
+                "type" => "SchedulingResolved",
+                "status" => "True",
+                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                "reason" => "SchedulingTranslated",
+                "message" => "High-level scheduling was translated into PodSpec defaults"
+              },
+              %{
+                "type" => "SchedulingInfrastructure",
+                "status" => infra_ready_condition_status(scheduling_feedback),
+                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                "reason" => infra_ready_condition_reason(scheduling_feedback),
+                "message" => infra_ready_condition_message(scheduling_feedback)
+              }
+            ])
+
+          axn
+          |> Bonny.Axn.update_status(fn _current_status ->
+            %{
+              "observedGeneration" => get_in(resource, ["metadata", "generation"]) || 1,
+              "phase" => "Ready",
+              "reason" => "ConfigurationValid",
+              "message" => "FlamePool configuration is valid",
+              "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+              "conditions" => conditions,
+              "resolvedScheduling" => resolved_scheduling,
+              "schedulingFeedback" => scheduling_feedback
+            }
+          end)
+          |> Bonny.Axn.success_event(
+            message:
+              "FlamePool configuration is valid (scheduling infra ready: #{scheduling_feedback["infraReady"]})"
+          )
+        else
+          {:error, reason} ->
+            Logger.warning("FlamePool priority class reconciliation failed: #{reason}")
+
+            conditions =
+              sanitize_conditions([
+                %{
+                  "type" => "Ready",
+                  "status" => "False",
+                  "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                  "reason" => "PriorityClassEnsureFailed",
+                  "message" => reason
+                },
+                %{
+                  "type" => "SchedulingResolved",
+                  "status" => "True",
+                  "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                  "reason" => "SchedulingTranslated",
+                  "message" => "High-level scheduling was translated into PodSpec defaults"
+                },
+                %{
+                  "type" => "SchedulingInfrastructure",
+                  "status" => "Unknown",
+                  "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                  "reason" => "InfrastructureCheckSkipped",
+                  "message" => "Infrastructure check skipped because priority class ensure failed"
+                }
+              ])
+
+            axn
+            |> Bonny.Axn.update_status(fn _current_status ->
+              %{
+                "observedGeneration" => get_in(resource, ["metadata", "generation"]) || 1,
+                "phase" => "Invalid",
+                "reason" => "PriorityClassEnsureFailed",
+                "message" => reason,
+                "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601(),
+                "conditions" => conditions,
+                "resolvedScheduling" => resolved_scheduling,
+                "schedulingFeedback" => %{
+                  "infraReady" => "Unknown",
+                  "matchingNodes" => 0,
+                  "matchingNodesNames" => "[]",
+                  "message" => "Priority class reconcile failed: #{reason}"
+                }
+              }
+            end)
+            |> Bonny.Axn.failure_event(message: reason)
+        end
 
       {:error, reason} ->
         Logger.warning("FlamePool validation failed: #{reason}")
@@ -169,11 +243,13 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
   # Validate pool configuration
   defp validate_pool_config(resource) do
     spec = Map.get(resource, "spec", %{})
+    scheduling = Map.get(spec, "scheduling") || %{}
     pod_template = Map.get(spec, "podTemplate", %{})
     pod_spec = Map.get(pod_template, "spec", %{})
     containers = Map.get(pod_spec, "containers", [])
 
-    cond do
+    with :ok <- validate_scheduling_config(scheduling) do
+      cond do
       is_nil(pod_template) or pod_template == %{} ->
         {:error, "podTemplate is required"}
 
@@ -194,6 +270,39 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
 
       true ->
         validate_container_resources(containers)
+      end
+    end
+  end
+
+  defp validate_scheduling_config(nil), do: :ok
+
+  defp validate_scheduling_config(scheduling) when is_map(scheduling) do
+    with :ok <- validate_enum_field(scheduling, "provider", ["generic", "karpenter"]),
+         :ok <- validate_enum_field(scheduling, "class", ["general", "cpu", "memory", "gpu"]),
+         :ok <- validate_enum_field(scheduling, "lifecycle", ["any", "on-demand", "spot"]),
+         :ok <- validate_enum_field(scheduling, "architecture", ["any", "amd64", "arm64"]),
+         :ok <- validate_enum_field(scheduling, "priority", ["low", "normal", "high", "critical"]) do
+      :ok
+    end
+  end
+
+  defp validate_scheduling_config(_), do: {:error, "spec.scheduling must be an object"}
+
+  defp validate_enum_field(map, field, allowed_values) do
+    case Map.get(map, field) do
+      nil ->
+        :ok
+
+      "" ->
+        :ok
+
+      value ->
+        if Enum.member?(allowed_values, value) do
+          :ok
+        else
+          {:error,
+           "spec.scheduling.#{field} has invalid value #{inspect(value)}. Allowed values: #{Enum.join(allowed_values, ", ")}"}
+        end
     end
   end
 
@@ -210,6 +319,197 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
       end
     end)
   end
+
+  defp ensure_priority_class_for_pool(nil, _resolved_scheduling), do: :ok
+
+  defp ensure_priority_class_for_pool(conn, resolved_scheduling) do
+    priority_class_name = get_in(resolved_scheduling, ["effective", "priorityClassName"])
+
+    case priority_class_name do
+      name when is_binary(name) and name in ["flame-low", "flame-normal", "flame-high", "flame-critical"] ->
+        ensure_priority_class(conn, name)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp ensure_priority_class(conn, name) do
+    case K8s.Client.get("scheduling.k8s.io/v1", "PriorityClass", name: name)
+         |> K8s.Client.put_conn(conn)
+         |> K8s.Client.run() do
+      {:ok, _} ->
+        :ok
+
+      {:error, %K8s.Client.APIError{reason: "NotFound"}} ->
+        create_priority_class(conn, name)
+
+      {:error, reason} ->
+        {:error, "Unable to fetch PriorityClass #{name}: #{inspect(reason)}"}
+    end
+  end
+
+  defp create_priority_class(conn, name) do
+    manifest = priority_class_manifest(name)
+
+    case K8s.Client.create(manifest)
+         |> K8s.Client.put_conn(conn)
+         |> K8s.Client.run() do
+      {:ok, _} ->
+        :ok
+
+      {:error, %K8s.Client.APIError{reason: "AlreadyExists"}} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, "Unable to create PriorityClass #{name}: #{inspect(reason)}"}
+    end
+  end
+
+  defp priority_class_manifest("flame-low") do
+    %{
+      "apiVersion" => "scheduling.k8s.io/v1",
+      "kind" => "PriorityClass",
+      "metadata" => %{"name" => "flame-low"},
+      "value" => 10_000,
+      "globalDefault" => false,
+      "description" => "FLAME low priority class"
+    }
+  end
+
+  defp priority_class_manifest("flame-normal") do
+    %{
+      "apiVersion" => "scheduling.k8s.io/v1",
+      "kind" => "PriorityClass",
+      "metadata" => %{"name" => "flame-normal"},
+      "value" => 100_000,
+      "globalDefault" => false,
+      "description" => "FLAME normal priority class"
+    }
+  end
+
+  defp priority_class_manifest("flame-high") do
+    %{
+      "apiVersion" => "scheduling.k8s.io/v1",
+      "kind" => "PriorityClass",
+      "metadata" => %{"name" => "flame-high"},
+      "value" => 900_000,
+      "globalDefault" => false,
+      "description" => "FLAME high priority class"
+    }
+  end
+
+  defp priority_class_manifest("flame-critical") do
+    %{
+      "apiVersion" => "scheduling.k8s.io/v1",
+      "kind" => "PriorityClass",
+      "metadata" => %{"name" => "flame-critical"},
+      "value" => 1_000_000,
+      "globalDefault" => false,
+      "description" => "FLAME critical priority class"
+    }
+  end
+
+  defp evaluate_scheduling_feedback(nil, _resolved_scheduling) do
+    %{
+      "infraReady" => "Unknown",
+      "matchingNodes" => 0,
+      "matchingNodesNames" => "[]",
+      "message" => "Node matching was skipped because no Kubernetes connection was available"
+    }
+  end
+
+  defp evaluate_scheduling_feedback(conn, resolved_scheduling) do
+    effective_selector = get_in(resolved_scheduling, ["effective", "nodeSelector"]) || %{}
+
+    if map_size(effective_selector) == 0 do
+      %{
+        "infraReady" => "Unknown",
+        "matchingNodes" => 0,
+        "matchingNodesNames" => "[]",
+        "message" => "No scheduling selector was generated. Pod scheduling depends on default scheduler behavior or explicit podTemplate settings"
+      }
+    else
+      case K8s.Client.list("v1", "Node")
+           |> K8s.Client.put_conn(conn)
+           |> K8s.Client.run() do
+        {:ok, %{"items" => nodes}} ->
+          matching_node_names =
+            nodes
+            |> Enum.filter(fn node ->
+              labels = get_in(node, ["metadata", "labels"]) || %{}
+              Enum.all?(effective_selector, fn {key, value} -> Map.get(labels, key) == value end)
+            end)
+            |> Enum.map(fn node -> get_in(node, ["metadata", "name"]) end)
+            |> Enum.reject(&is_nil/1)
+
+          formatted_names = format_matching_nodes_names_for_status(matching_node_names)
+
+          %{
+            "infraReady" => if(formatted_names.matching_nodes > 0, do: "True", else: "False"),
+            "matchingNodes" => formatted_names.matching_nodes,
+            "matchingNodesNames" => formatted_names.matching_nodes_names,
+            "message" =>
+              if(formatted_names.matching_nodes > 0,
+                do: "Found #{formatted_names.matching_nodes} node(s) matching resolved scheduling selectors",
+                else: "No nodes matched resolved scheduling selectors. Ensure infrastructure labels/taints are configured"
+              )
+          }
+
+        {:error, reason} ->
+          %{
+            "infraReady" => "Unknown",
+            "matchingNodes" => 0,
+            "matchingNodesNames" => "[]",
+            "message" => "Unable to evaluate scheduling selectors against cluster nodes: #{inspect(reason)}"
+          }
+      end
+    end
+  rescue
+    error ->
+      %{
+        "infraReady" => "Unknown",
+        "matchingNodes" => 0,
+        "matchingNodesNames" => "[]",
+        "message" => "Unexpected error while evaluating scheduling selectors: #{inspect(error)}"
+      }
+  end
+
+  @doc false
+  def format_matching_nodes_names_for_status(node_names, max_names \\ @max_matching_node_names)
+
+  def format_matching_nodes_names_for_status(node_names, max_names)
+      when is_list(node_names) and is_integer(max_names) and max_names > 0 do
+    matching_nodes = length(node_names)
+    displayed_node_names = Enum.take(node_names, max_names)
+    matching_nodes_omitted = max(matching_nodes - length(displayed_node_names), 0)
+
+    %{
+      matching_nodes: matching_nodes,
+      matching_nodes_names: format_matching_nodes_names(displayed_node_names, matching_nodes_omitted)
+    }
+  end
+
+  def format_matching_nodes_names_for_status(node_names, _max_names) when is_list(node_names) do
+    format_matching_nodes_names_for_status(node_names, @max_matching_node_names)
+  end
+
+  defp format_matching_nodes_names(displayed_node_names, omitted_nodes) do
+    suffix = if omitted_nodes > 0, do: ",...", else: ""
+
+    "[" <> Enum.join(displayed_node_names, ",") <> suffix <> "]"
+  end
+
+  defp infra_ready_condition_status(%{"infraReady" => "True"}), do: "True"
+  defp infra_ready_condition_status(%{"infraReady" => "False"}), do: "False"
+  defp infra_ready_condition_status(_), do: "Unknown"
+
+  defp infra_ready_condition_reason(%{"infraReady" => "True"}), do: "MatchingNodesFound"
+  defp infra_ready_condition_reason(%{"infraReady" => "False"}), do: "NoMatchingNodes"
+  defp infra_ready_condition_reason(_), do: "InfrastructureCheckSkipped"
+
+  defp infra_ready_condition_message(%{"message" => message}), do: message
+  defp infra_ready_condition_message(_), do: "Scheduling infrastructure feedback not available"
 
   @doc false
   def sanitize_conditions(conditions) when is_list(conditions) do
