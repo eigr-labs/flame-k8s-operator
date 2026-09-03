@@ -185,6 +185,12 @@ metadata:
   name: my-runner-pool
   namespace: default
 spec:
+  scheduling:
+    provider: generic
+    class: cpu
+    lifecycle: on-demand
+    architecture: amd64
+    priority: normal
   podTemplate:
     spec: # This is a pod template specification. See https://kubernetes.io/docs/concepts/workloads/pods/#pod-templates
       containers:
@@ -206,11 +212,35 @@ spec:
           emptyDir: {}
 ```
 
+When `spec.scheduling.priority` maps to one of the built-in flame classes,
+the operator ensures the `PriorityClass` exists using create-if-not-exists
+semantics (`flame-low`, `flame-normal`, `flame-high`, `flame-critical`).
+
 Then:
 
 ```sh
 kubectl apply -f my-runner.yaml
 ```
+
+You can inspect how the operator translated high-level scheduling intent:
+
+```sh
+kubectl get flamepool my-runner-pool -n default -o yaml
+```
+
+Look for:
+
+- `status.resolvedScheduling`
+- `status.schedulingFeedback`
+- `status.conditions` with `SchedulingResolved` and `SchedulingInfrastructure`
+
+You can also read quick scheduling feedback directly from list columns:
+
+```sh
+kubectl get flamepools -A
+```
+
+Columns include `InfraReady` and `MatchingNodes` (node count).
 
 Once this is done, simply add the annotation `flame.org/pool-config-ref` to your Deployment file. Example:
 

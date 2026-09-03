@@ -37,8 +37,10 @@ defmodule FlameK8sController.K8s.Pod do
     container = merge_container_spec(pool_template, runner_spec, image, parent_ref)
 
     # Build pod spec
+    resolved_pool_spec = resolve_pool_scheduling(pool_template, pool_config)
+
     pod_spec =
-      pool_template["spec"]
+      resolved_pool_spec
       |> Map.put("containers", [container])
       |> Map.put("restartPolicy", "Never")
       |> Map.put("terminationGracePeriodSeconds", termination_grace_period_seconds)
@@ -60,6 +62,46 @@ defmodule FlameK8sController.K8s.Pod do
         "labels" => pod_labels
       },
       "spec" => pod_spec
+    }
+  end
+
+  @doc false
+  def resolved_scheduling(pool_config) when is_map(pool_config) do
+    pool_template = get_pool_template(pool_config)
+    base_spec = Map.get(pool_template, "spec", %{}) || %{}
+    scheduling = get_in(pool_config, ["spec", "scheduling"]) || %{}
+
+    provider = scheduling_provider(scheduling)
+
+    generated = %{
+      "provider" => provider,
+      "nodeSelector" => scheduling_node_selector(scheduling),
+      "tolerations" => scheduling_tolerations(scheduling),
+      "priorityClassName" => scheduling_priority_class_name(scheduling)
+    }
+
+    effective_spec = resolve_pool_scheduling(pool_template, pool_config)
+
+    %{
+      "input" => scheduling,
+      "generated" => prune_empty_scheduling(generated),
+      "effective" =>
+        prune_empty_scheduling(%{
+          "nodeSelector" => Map.get(effective_spec, "nodeSelector"),
+          "tolerations" => Map.get(effective_spec, "tolerations"),
+          "priorityClassName" => Map.get(effective_spec, "priorityClassName")
+        }),
+      "overrides" =>
+        prune_empty_scheduling(%{
+          "nodeSelector" => Map.get(base_spec, "nodeSelector"),
+          "tolerations" => Map.get(base_spec, "tolerations"),
+          "priorityClassName" => Map.get(base_spec, "priorityClassName")
+        }),
+      "mappingConventions" => [
+        "class maps to nodeSelector flame.org/runner-class and may require matching node labels",
+        "lifecycle maps by provider: generic->flame.org/capacity-type, karpenter->karpenter.sh/capacity-type",
+        "architecture maps to nodeSelector kubernetes.io/arch"
+      ]
     }
   end
 
@@ -97,6 +139,161 @@ defmodule FlameK8sController.K8s.Pod do
 
   defp get_pool_template(pool_config) do
     get_in(pool_config, ["spec", "podTemplate"]) || %{"spec" => %{}}
+  end
+
+  defp resolve_pool_scheduling(pool_template, pool_config) do
+    pool_spec = Map.get(pool_template, "spec", %{}) || %{}
+    scheduling = get_in(pool_config, ["spec", "scheduling"]) || %{}
+
+    pool_spec
+    |> apply_node_selector_defaults(scheduling)
+    |> apply_toleration_defaults(scheduling)
+    |> apply_priority_class_defaults(scheduling)
+  end
+
+  defp apply_node_selector_defaults(pod_spec, scheduling) do
+    generated_selector = scheduling_node_selector(scheduling)
+    existing_selector = Map.get(pod_spec, "nodeSelector", %{}) || %{}
+
+    if map_size(generated_selector) == 0 do
+      pod_spec
+    else
+      Map.put(pod_spec, "nodeSelector", Map.merge(generated_selector, existing_selector))
+    end
+  end
+
+  defp apply_toleration_defaults(pod_spec, scheduling) do
+    generated_tolerations = scheduling_tolerations(scheduling)
+    existing_tolerations = Map.get(pod_spec, "tolerations")
+
+    cond do
+      generated_tolerations == [] ->
+        pod_spec
+
+      is_list(existing_tolerations) and existing_tolerations != [] ->
+        # User-provided podTemplate tolerations take precedence for fine control.
+        pod_spec
+
+      true ->
+        Map.put(pod_spec, "tolerations", generated_tolerations)
+    end
+  end
+
+  defp apply_priority_class_defaults(pod_spec, scheduling) do
+    generated_priority_class = scheduling_priority_class_name(scheduling)
+    existing_priority_class = Map.get(pod_spec, "priorityClassName")
+
+    cond do
+      existing_priority_class not in [nil, ""] -> pod_spec
+      is_nil(generated_priority_class) -> pod_spec
+      true -> Map.put(pod_spec, "priorityClassName", generated_priority_class)
+    end
+  end
+
+  defp scheduling_node_selector(scheduling) when is_map(scheduling) do
+    provider = scheduling_provider(scheduling)
+    class = Map.get(scheduling, "class")
+    lifecycle = Map.get(scheduling, "lifecycle")
+    architecture = Map.get(scheduling, "architecture")
+
+    %{}
+    |> put_selector_if_present("flame.org/runner-class", class_label(class))
+    |> put_selector_if_present(lifecycle_selector_key(provider), lifecycle_label(lifecycle))
+    |> put_selector_if_present("kubernetes.io/arch", architecture_label(architecture))
+  end
+
+  defp scheduling_node_selector(_), do: %{}
+
+  defp scheduling_tolerations(scheduling) when is_map(scheduling) do
+    provider = scheduling_provider(scheduling)
+    class = Map.get(scheduling, "class")
+    lifecycle = Map.get(scheduling, "lifecycle")
+
+    []
+    |> maybe_add_toleration(lifecycle_toleration(provider, lifecycle))
+    |> maybe_add_toleration(class_toleration(class))
+  end
+
+  defp scheduling_tolerations(_), do: []
+
+  defp scheduling_provider(scheduling) when is_map(scheduling) do
+    case Map.get(scheduling, "provider") do
+      "karpenter" -> "karpenter"
+      _ -> "generic"
+    end
+  end
+
+  defp scheduling_provider(_), do: "generic"
+
+  defp lifecycle_selector_key("karpenter"), do: "karpenter.sh/capacity-type"
+  defp lifecycle_selector_key(_), do: "flame.org/capacity-type"
+
+  defp scheduling_priority_class_name(scheduling) when is_map(scheduling) do
+    scheduling
+    |> Map.get("priority")
+    |> case do
+      "low" -> "flame-low"
+      "normal" -> "flame-normal"
+      "high" -> "flame-high"
+      "critical" -> "flame-critical"
+      _ -> nil
+    end
+  end
+
+  defp scheduling_priority_class_name(_), do: nil
+
+  defp class_label("general"), do: "general"
+  defp class_label("cpu"), do: "cpu"
+  defp class_label("memory"), do: "memory"
+  defp class_label("gpu"), do: "gpu"
+  defp class_label(_), do: nil
+
+  defp lifecycle_label("spot"), do: "spot"
+  defp lifecycle_label("on-demand"), do: "on-demand"
+  defp lifecycle_label(_), do: nil
+
+  defp architecture_label("amd64"), do: "amd64"
+  defp architecture_label("arm64"), do: "arm64"
+  defp architecture_label(_), do: nil
+
+  defp lifecycle_toleration(provider, "spot") do
+    %{
+      "key" => lifecycle_selector_key(provider),
+      "operator" => "Equal",
+      "value" => "spot",
+      "effect" => "NoSchedule"
+    }
+  end
+
+  defp lifecycle_toleration(_provider, _), do: nil
+
+  defp class_toleration("gpu") do
+    %{
+      "key" => "nvidia.com/gpu",
+      "operator" => "Exists",
+      "effect" => "NoSchedule"
+    }
+  end
+
+  defp class_toleration(_), do: nil
+
+  defp put_selector_if_present(map, _key, nil), do: map
+  defp put_selector_if_present(map, _key, ""), do: map
+  defp put_selector_if_present(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_add_toleration(list, nil), do: list
+  defp maybe_add_toleration(list, toleration), do: list ++ [toleration]
+
+  defp prune_empty_scheduling(map) do
+    map
+    |> Enum.reject(fn
+      {_k, nil} -> true
+      {_k, ""} -> true
+      {_k, v} when is_map(v) -> map_size(v) == 0
+      {_k, v} when is_list(v) -> v == []
+      _ -> false
+    end)
+    |> Map.new()
   end
 
   defp get_parent_ref(runner_spec) do

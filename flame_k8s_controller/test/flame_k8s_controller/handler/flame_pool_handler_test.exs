@@ -14,6 +14,13 @@ defmodule FlameK8sController.Handler.FlamePoolHandlerTest do
       assert result.status["message"] == "FlamePool configuration is valid"
       assert Enum.any?(result.status["conditions"], &(&1["type"] == "Ready" and &1["status"] == "True"))
       assert Enum.any?(result.status["conditions"], &(&1["type"] == "TemplateValid" and &1["status"] == "True"))
+      assert Enum.any?(result.status["conditions"], &(&1["type"] == "SchedulingResolved" and &1["status"] == "True"))
+      assert Enum.any?(result.status["conditions"], &(&1["type"] == "SchedulingInfrastructure"))
+      assert is_map(result.status["resolvedScheduling"])
+      assert get_in(result.status, ["resolvedScheduling", "generated", "provider"]) == "generic"
+      assert is_map(result.status["schedulingFeedback"])
+      assert Map.has_key?(result.status["schedulingFeedback"], "matchingNodes")
+      assert is_integer(result.status["schedulingFeedback"]["matchingNodes"])
       assert length(result.events) == 1
     end
 
@@ -52,6 +59,34 @@ defmodule FlameK8sController.Handler.FlamePoolHandlerTest do
       assert result.status["message"] =~ "Invalid resources in podTemplate.spec.containers[0]"
       assert result.status["message"] =~ "requests.cpu"
     end
+
+    test "marks pool as invalid when scheduling abstraction has unsupported value" do
+      invalid_resource =
+        valid_pool_resource()
+        |> put_in(["spec", "scheduling"], %{"lifecycle" => "preemptible"})
+
+      axn = base_axn(invalid_resource, :modify)
+      result = FlamePoolHandler.call(axn, nil)
+
+      assert result.status["phase"] == "Invalid"
+      assert result.status["reason"] == "ConfigurationInvalid"
+      assert result.status["message"] =~ "spec.scheduling.lifecycle"
+      assert result.status["message"] =~ "Allowed values"
+    end
+
+    test "marks pool as invalid when provider is unsupported" do
+      invalid_resource =
+        valid_pool_resource()
+        |> put_in(["spec", "scheduling"], %{"provider" => "eks"})
+
+      axn = base_axn(invalid_resource, :modify)
+      result = FlamePoolHandler.call(axn, nil)
+
+      assert result.status["phase"] == "Invalid"
+      assert result.status["message"] =~ "spec.scheduling.provider"
+      assert result.status["message"] =~ "Allowed values: generic, karpenter"
+    end
+
   end
 
   describe "sanitize_conditions/1" do

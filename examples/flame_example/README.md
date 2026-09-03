@@ -89,6 +89,47 @@ kubectl apply -f examples/flame_example/.k8s/pool.yaml
 kubectl apply -f examples/flame_example/.k8s/deployment.yaml
 ```
 
+The pool example includes an optional high-level scheduling block:
+
+```yaml
+spec:
+	scheduling:
+		provider: karpenter
+		class: gpu
+		lifecycle: spot
+		architecture: amd64
+		priority: high
+```
+
+The operator translates this into Pod scheduling defaults (selectors,
+tolerations, priority class). For fine-grained control, continue using
+`spec.podTemplate.spec` directly.
+
+Provider behavior:
+
+- `provider: generic` uses non-provider-specific label conventions
+- `provider: karpenter` keeps `karpenter.sh/capacity-type` mapping
+
+To inspect how scheduling was resolved by the operator:
+
+```bash
+kubectl get flamepool custom-pool-example -n default -o yaml
+```
+
+Quick summary columns are also available:
+
+```bash
+kubectl get flamepool custom-pool-example -n default
+```
+
+Look at `InfraReady` and `MatchingNodes` (node count).
+
+Look at status fields:
+
+- `status.resolvedScheduling`
+- `status.schedulingFeedback`
+- `status.conditions[type=SchedulingResolved|SchedulingInfrastructure]`
+
 That is the real flow. The `FlameRunner` CR should be created by the webhook/backend path after the application calls `FLAME.call/3`, not by applying a runner manifest directly.
 
 To inspect:

@@ -23,6 +23,14 @@ spec:
           jsonPath: .status.phase
           name: Phase
           type: string
+        - description: Whether cluster nodes currently match resolved scheduling selectors
+          jsonPath: .status.schedulingFeedback.infraReady
+          name: InfraReady
+          type: string
+        - description: Number of nodes matching resolved scheduling selectors
+          jsonPath: .status.schedulingFeedback.matchingNodes
+          name: MatchingNodes
+          type: integer
         - description: Age of the FlamePool
           jsonPath: .metadata.creationTimestamp
           name: Age
@@ -58,6 +66,46 @@ spec:
                       x-kubernetes-preserve-unknown-fields: true
                   required:
                     - spec
+                  type: object
+                scheduling:
+                  description: Optional high-level scheduling intent translated by the operator into Kubernetes pod scheduling fields.
+                  properties:
+                    architecture:
+                      description: CPU architecture preference
+                      enum:
+                        - any
+                        - amd64
+                        - arm64
+                      type: string
+                    class:
+                      description: Workload class abstraction for runner placement
+                      enum:
+                        - general
+                        - cpu
+                        - memory
+                        - gpu
+                      type: string
+                    lifecycle:
+                      description: Capacity lifecycle preference
+                      enum:
+                        - any
+                        - on-demand
+                        - spot
+                      type: string
+                    priority:
+                      description: Priority abstraction mapped to priorityClassName
+                      enum:
+                        - low
+                        - normal
+                        - high
+                        - critical
+                      type: string
+                    provider:
+                      description: Mapping provider used to translate scheduling lifecycle constraints
+                      enum:
+                        - generic
+                        - karpenter
+                      type: string
                   type: object
               required:
                 - podTemplate
@@ -112,6 +160,24 @@ spec:
                 reason:
                   description: Machine-readable reason for the current phase
                   type: string
+                resolvedScheduling:
+                  description: Operator-resolved scheduling translation from spec.scheduling to PodSpec
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                schedulingFeedback:
+                  description: Infrastructure feedback for resolved scheduling selectors
+                  properties:
+                    infraReady:
+                      enum:
+                        - 'True'
+                        - 'False'
+                        - Unknown
+                      type: string
+                    matchingNodes:
+                      type: integer
+                    message:
+                      type: string
+                  type: object
               type: object
           required:
             - spec

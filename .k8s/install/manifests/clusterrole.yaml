@@ -141,3 +141,11 @@ rules:
       - roles
     verbs:
       - '*'
+  - apiGroups:
+      - scheduling.k8s.io
+    resources:
+      - priorityclasses
+    verbs:
+      - create
+      - get
+      - list

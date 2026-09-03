@@ -46,6 +46,36 @@ defmodule FlameK8sController.K8s.PodTest do
       refute Enum.any?(env, &(&1["name"] == "RELEASE_DISTRIBUTION"))
       refute Enum.any?(env, &(&1["name"] == "RELEASE_NODE"))
     end
+
+    test "maps high-level scheduling into pod spec defaults" do
+      manifest = Pod.manifest(base_args(%{}), pool_config_with_scheduling())
+
+      assert get_in(manifest, ["spec", "nodeSelector", "flame.org/runner-class"]) == "gpu"
+      assert get_in(manifest, ["spec", "nodeSelector", "flame.org/capacity-type"]) == "spot"
+      assert get_in(manifest, ["spec", "nodeSelector", "kubernetes.io/arch"]) == "arm64"
+      assert get_in(manifest, ["spec", "priorityClassName"]) == "flame-high"
+
+      tolerations = get_in(manifest, ["spec", "tolerations"]) || []
+      assert Enum.any?(tolerations, &(&1["key"] == "flame.org/capacity-type" and &1["value"] == "spot"))
+      assert Enum.any?(tolerations, &(&1["key"] == "nvidia.com/gpu" and &1["operator"] == "Exists"))
+    end
+
+    test "uses provider-specific lifecycle mapping when provider is karpenter" do
+      manifest = Pod.manifest(base_args(%{}), pool_config_with_karpenter_scheduling())
+
+      assert get_in(manifest, ["spec", "nodeSelector", "karpenter.sh/capacity-type"]) == "spot"
+      refute get_in(manifest, ["spec", "nodeSelector", "flame.org/capacity-type"])
+    end
+
+    test "keeps explicit podTemplate scheduling fields over high-level defaults" do
+      manifest = Pod.manifest(base_args(%{}), pool_config_with_scheduling_overrides())
+
+      assert get_in(manifest, ["spec", "nodeSelector", "flame.org/runner-class"]) == "cpu"
+      assert get_in(manifest, ["spec", "priorityClassName"]) == "my-custom-priority"
+
+      tolerations = get_in(manifest, ["spec", "tolerations"]) || []
+      assert tolerations == [%{"key" => "custom", "operator" => "Exists", "effect" => "NoSchedule"}]
+    end
   end
 
   describe "validate_resources/1" do
@@ -114,4 +144,35 @@ defmodule FlameK8sController.K8s.PodTest do
       }
     }
   end
+
+  defp pool_config_with_scheduling do
+    pool_config()
+    |> put_in(["spec", "scheduling"], %{
+      "class" => "gpu",
+      "lifecycle" => "spot",
+      "architecture" => "arm64",
+      "priority" => "high"
+    })
+  end
+
+  defp pool_config_with_karpenter_scheduling do
+    pool_config()
+    |> put_in(["spec", "scheduling"], %{
+      "provider" => "karpenter",
+      "class" => "gpu",
+      "lifecycle" => "spot",
+      "architecture" => "arm64",
+      "priority" => "high"
+    })
+  end
+
+  defp pool_config_with_scheduling_overrides do
+    pool_config_with_scheduling()
+    |> put_in(["spec", "podTemplate", "spec", "nodeSelector"], %{"flame.org/runner-class" => "cpu"})
+    |> put_in(["spec", "podTemplate", "spec", "priorityClassName"], "my-custom-priority")
+    |> put_in(["spec", "podTemplate", "spec", "tolerations"], [
+      %{"key" => "custom", "operator" => "Exists", "effect" => "NoSchedule"}
+    ])
+  end
+
 end
