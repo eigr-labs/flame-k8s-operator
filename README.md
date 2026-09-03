@@ -89,7 +89,7 @@ make local-e2e cluster_name=my-cluster operator_namespace=flame version=dev-loca
 
 ### Install Kubernetes Controller
 
-To install flame-k8s kubernetes controller, just download the manifest from the [release page](https://github.com/eigr-labs/flame-k8s/releases) and apply it to your cluster.
+To install flame-k8s kubernetes controller, just download the manifest from the [release page](https://github.com/eigr-labs/flame-k8s-operator/releases) and apply it to your cluster.
 
 ## Usage
 
