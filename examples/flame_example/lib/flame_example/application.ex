@@ -16,7 +16,7 @@ defmodule FlameExample.Application do
 
     children =
       case FLAME.Parent.get() do
-        nil -> children ++ [{FlameExample.DemoRunner, interval: 30_000, initial_delay: 3_000}]
+        nil -> children ++ [{FlameExample.DemoRunner, interval: 30_000, initial_delay: 10_000}]
         _parent -> children
       end
 

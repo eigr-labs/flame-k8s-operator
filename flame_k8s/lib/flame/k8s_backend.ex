@@ -78,7 +78,11 @@ defmodule FLAME.K8sBackend do
 
     new_env =
       Map.merge(
-        %{FLAME_PARENT: encoded_parent},
+        %{
+          FLAME_PARENT: encoded_parent,
+          FLAME_NODE_BASE: runner_node_base,
+          FLAME_DIST_AUTO_CONFIG: System.get_env("FLAME_DIST_AUTO_CONFIG", "true")
+        },
         state.env
       )
 

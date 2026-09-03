@@ -96,4 +96,6 @@ kubectl get flamerunners -A
 - In cluster, backend auth uses service account credentials.
 - Outside cluster, backend reads kubeconfig from `KUBECONFIG` (first path when
   multiple are provided), with fallback to `~/.kube/config`.
+- Backend includes `FLAME_NODE_BASE` in generated `FlameRunner` env so runner
+  pods can derive `RELEASE_NODE` as `$(FLAME_NODE_BASE)@$(POD_IP)`.
 
