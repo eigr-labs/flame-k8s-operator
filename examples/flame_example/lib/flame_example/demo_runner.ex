@@ -27,20 +27,27 @@ defmodule FlameExample.DemoRunner do
 
   @impl true
   def handle_info(:run_demo, state) do
-    case FlameExample.run_demo() do
-      {:ok, result} ->
-        Logger.info("FLAME demo call completed", result: inspect(result))
+    case run_demo_safe() do
+      {:error, reason} ->
+        Logger.error("FLAME demo call failed: #{inspect(reason)}")
 
-      other ->
-        Logger.warning("FLAME demo call returned #{inspect(other)}")
+      result ->
+        Logger.info("FLAME demo call completed: #{inspect(result)}")
     end
 
     Process.send_after(self(), :run_demo, state.interval)
     {:noreply, state}
+  end
+
+  defp run_demo_safe do
+    FlameExample.run_demo()
   rescue
     error ->
-      Logger.warning("FLAME demo call failed: #{Exception.message(error)}")
-      Process.send_after(self(), :run_demo, state.interval)
-      {:noreply, state}
+      {:error, Exception.message(error)}
+  catch
+    :exit, reason ->
+      {:error, reason}
+    kind, reason ->
+      {:error, {kind, reason}}
   end
 end

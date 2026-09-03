@@ -25,10 +25,26 @@ defmodule FlameK8sController.K8s.PodTest do
 
       assert get_in(manifest, ["metadata", "labels", "flame.org/runner"]) == "true"
       assert get_in(manifest, ["metadata", "labels", "flame.org/parent"]) == "app-parent"
-      refute Enum.any?(env, &(&1["name"] == "RELEASE_DISTRIBUTION" and &1["value"] == "name"))
-      refute Enum.any?(env, fn env_var ->
-               env_var["name"] == "RELEASE_NODE" and env_var["value"] == "$(RELEASE_NAME)@$(POD_IP)"
+      assert Enum.any?(env, &(&1["name"] == "RELEASE_DISTRIBUTION" and &1["value"] == "name"))
+      assert Enum.any?(env, fn env_var ->
+               env_var["name"] == "RELEASE_NODE" and env_var["value"] == "$(FLAME_NODE_BASE)@$(POD_IP)"
              end)
+    end
+
+    test "does not inject distribution env when FLAME_DIST_AUTO_CONFIG=false" do
+      args =
+        base_args(%{
+          "env" => [
+            %{"name" => "EXTRA_ENV", "value" => "1"},
+            %{"name" => "FLAME_DIST_AUTO_CONFIG", "value" => "false"}
+          ]
+        })
+
+      manifest = Pod.manifest(args, pool_config())
+      env = get_in(manifest, ["spec", "containers", Access.at(0), "env"]) || []
+
+      refute Enum.any?(env, &(&1["name"] == "RELEASE_DISTRIBUTION"))
+      refute Enum.any?(env, &(&1["name"] == "RELEASE_NODE"))
     end
   end
 

@@ -131,6 +131,21 @@ Optional annotation:
 
 - `flame.org/cookie-secret-ref`: overrides the default secret name `flame-erlang-cookie`
 
+Distribution behavior:
+
+- Parent workload pods can be mutated with `RELEASE_DISTRIBUTION=name` and
+  `RELEASE_NODE=<otp-app>@$(POD_IP)` when `flame.org/dist-auto-config: "true"`.
+- FlameRunner pods are generated with `RELEASE_DISTRIBUTION=name` and
+  `RELEASE_NODE=$(FLAME_NODE_BASE)@$(POD_IP)`.
+- When `flame.org/dist-auto-config: "false"` is explicitly set, distribution
+  auto-injection is disabled for both parent workload and generated runner pods.
+- `FLAME_NODE_BASE` is injected by the backend in the generated `FlameRunner.spec.env`.
+
+Runner GC scheduler env:
+
+- `FLAME_RUNNER_GC_INTERVAL_MS` (default `30000`)
+- `FLAME_RUNNER_RETENTION_LIMIT` (default `5`)
+
 The operator will ensure that the referenced Secret exists in the workload namespace before admitting the workload or creating runner pods.
 
 ## Testing

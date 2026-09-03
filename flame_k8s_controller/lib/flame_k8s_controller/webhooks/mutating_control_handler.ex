@@ -29,6 +29,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
     annotations = Map.get(metadata, "annotations", %{})
     pool_cfg_ref = Map.get(annotations, "flame.org/pool-config-ref", "default-pool")
     cookie_secret_ref = cookie_secret_ref(metadata)
+    dist_auto_config = if(Map.get(annotations, "flame.org/dist-auto-config", "true") |> to_bool(), do: "true", else: "false")
 
     timeout_to_shoot_headhead =
       Map.get(annotations, "flame.org/runner-termination-timeout", 60000)
@@ -69,6 +70,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandler do
           }
         },
         %{"name" => "FLAME_COOKIE_SECRET_REF", "value" => cookie_secret_ref},
+        %{"name" => "FLAME_DIST_AUTO_CONFIG", "value" => dist_auto_config},
         %{"name" => "POD_TERMINATION_TIMEOUT", "value" => timeout_to_shoot_headhead},
         %{"name" => "FLAME_POOL_CONFIG_REF", "value" => pool_cfg_ref}
       ]

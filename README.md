@@ -153,10 +153,17 @@ See what each annotation means in the following table:
 | Annotation                           | Default          | Detail        |
 | -------------------------------------| -----------------| ------------- | 
 | flame.org/enabled                    | "false"          | Enable or disable Flame. |
-| flame.org/dist-auto-config           | "false"          | Auto configure RELEASE_DISTRIBUTION and RELEASE_NODE based on otp application name.             |
+| flame.org/dist-auto-config           | "true"           | Auto configure RELEASE_DISTRIBUTION and RELEASE_NODE. When set to "false", automatic distribution env injection is disabled for both parent workload and generated runner pods.             |
 | flame.org/otp-app                    |                  | Application release name. Required if dist-auto-config is set to "true".  |
 | flame.org/pool-config-ref            | "default-pool"   | Flame Pool configuration reference name. See more in the Configuration section.           |
 | flame.org/runner-termination-timeout | 60000            | Timeout in milliseconds that the Runner will have to finish before the controller sends the POD delete command.
+
+Runner pod node naming is resolved differently from the parent workload mutation:
+
+- Parent workload pod: webhook can inject `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE=<otp-app>@$(POD_IP)`.
+- FlameRunner pod: controller can build `RELEASE_NODE=$(FLAME_NODE_BASE)@$(POD_IP)` and use `RELEASE_DISTRIBUTION=name`.
+- If `flame.org/dist-auto-config` is explicitly set to `"false"`, both parent and runner auto-injection are disabled and you can provide distribution env vars manually at your own risk.
+- `FLAME_NODE_BASE` is provided by `FLAME.K8sBackend` when creating the `FlameRunner` resource.
 
 Now you can start scaling your applications with [Flame](https://github.com/phoenixframework/flame)... with a little help from [eigr](https://github.com/eigr) \0/
 

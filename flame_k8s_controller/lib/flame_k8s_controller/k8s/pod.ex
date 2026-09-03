@@ -151,7 +151,7 @@ defmodule FlameK8sController.K8s.Pod do
       Map.get(runner_spec, "cookieSecretRef") || Map.get(runner_spec, :cookieSecretRef) ||
         "flame-erlang-cookie"
 
-    [
+    base_env = [
       %{
         "name" => "FLAME_PARENT_NAME",
         "value" => parent_name
@@ -182,6 +182,42 @@ defmodule FlameK8sController.K8s.Pod do
         }
       }
     ]
+
+    distribution_env =
+      if dist_auto_config_enabled?(runner_spec) do
+        [
+          %{
+            "name" => "RELEASE_DISTRIBUTION",
+            "value" => "name"
+          },
+          %{
+            "name" => "RELEASE_NODE",
+            "value" => "$(FLAME_NODE_BASE)@$(POD_IP)"
+          }
+        ]
+      else
+        []
+      end
+
+    base_env ++ distribution_env
+  end
+
+  defp dist_auto_config_enabled?(runner_spec) do
+    runner_env = Map.get(runner_spec, "env") || Map.get(runner_spec, :env) || []
+
+    value =
+      Enum.find_value(runner_env, fn env_entry ->
+        if is_map(env_entry) and Map.get(env_entry, "name") == "FLAME_DIST_AUTO_CONFIG" do
+          Map.get(env_entry, "value")
+        end
+      end)
+
+    case value do
+      nil -> true
+      "" -> true
+      val when is_binary(val) -> String.downcase(val) == "true"
+      _ -> true
+    end
   end
 
   defp validate_request_vs_limit(_resource_name, nil, _limit, _parser), do: :ok
