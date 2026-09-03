@@ -27,10 +27,10 @@ spec:
           jsonPath: .status.schedulingFeedback.infraReady
           name: InfraReady
           type: string
-        - description: Number of nodes matching resolved scheduling selectors
-          jsonPath: .status.schedulingFeedback.matchingNodes
+        - description: Comma-separated node names matching resolved scheduling selectors
+          jsonPath: .status.schedulingFeedback.matchingNodesNames
           name: MatchingNodes
-          type: integer
+          type: string
         - description: Age of the FlamePool
           jsonPath: .metadata.creationTimestamp
           name: Age
@@ -175,6 +175,8 @@ spec:
                       type: string
                     matchingNodes:
                       type: integer
+                    matchingNodesNames:
+                      type: string
                     message:
                       type: string
                   type: object

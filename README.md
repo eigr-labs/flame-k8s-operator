@@ -240,7 +240,7 @@ You can also read quick scheduling feedback directly from list columns:
 kubectl get flamepools -A
 ```
 
-Columns include `InfraReady` and `MatchingNodes` (format `[node-a,node-b,node-c,...]`, capped at 3 names).
+Columns include `InfraReady` and `MatchingNodes` (node count).
 
 Once this is done, simply add the annotation `flame.org/pool-config-ref` to your Deployment file. Example:
 

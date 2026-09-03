@@ -42,7 +42,6 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
 
   @behaviour Pluggable
   @finalizer_id "flame.org/flamepool-protection"
-  @max_matching_node_names 3
 
   def finalizer_id, do: @finalizer_id
 
@@ -89,6 +88,7 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
         resolved_scheduling = Pod.resolved_scheduling(resource)
 
         with :ok <- ensure_priority_class_for_pool(conn, resolved_scheduling) do
+          maybe_refresh_pool_runners(conn, resource, action)
           scheduling_feedback = evaluate_scheduling_feedback(conn, resolved_scheduling)
 
           conditions =
@@ -182,7 +182,6 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
                 "schedulingFeedback" => %{
                   "infraReady" => "Unknown",
                   "matchingNodes" => 0,
-                  "matchingNodesNames" => "[]",
                   "message" => "Priority class reconcile failed: #{reason}"
                 }
               }
@@ -414,7 +413,6 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
     %{
       "infraReady" => "Unknown",
       "matchingNodes" => 0,
-      "matchingNodesNames" => "[]",
       "message" => "Node matching was skipped because no Kubernetes connection was available"
     }
   end
@@ -426,7 +424,6 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
       %{
         "infraReady" => "Unknown",
         "matchingNodes" => 0,
-        "matchingNodesNames" => "[]",
         "message" => "No scheduling selector was generated. Pod scheduling depends on default scheduler behavior or explicit podTemplate settings"
       }
     else
@@ -434,24 +431,18 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
            |> K8s.Client.put_conn(conn)
            |> K8s.Client.run() do
         {:ok, %{"items" => nodes}} ->
-          matching_node_names =
-            nodes
-            |> Enum.filter(fn node ->
+          matching_nodes =
+            Enum.count(nodes, fn node ->
               labels = get_in(node, ["metadata", "labels"]) || %{}
               Enum.all?(effective_selector, fn {key, value} -> Map.get(labels, key) == value end)
             end)
-            |> Enum.map(fn node -> get_in(node, ["metadata", "name"]) end)
-            |> Enum.reject(&is_nil/1)
-
-          formatted_names = format_matching_nodes_names_for_status(matching_node_names)
 
           %{
-            "infraReady" => if(formatted_names.matching_nodes > 0, do: "True", else: "False"),
-            "matchingNodes" => formatted_names.matching_nodes,
-            "matchingNodesNames" => formatted_names.matching_nodes_names,
+            "infraReady" => if(matching_nodes > 0, do: "True", else: "False"),
+            "matchingNodes" => matching_nodes,
             "message" =>
-              if(formatted_names.matching_nodes > 0,
-                do: "Found #{formatted_names.matching_nodes} node(s) matching resolved scheduling selectors",
+              if(matching_nodes > 0,
+                do: "Found #{matching_nodes} node(s) matching resolved scheduling selectors",
                 else: "No nodes matched resolved scheduling selectors. Ensure infrastructure labels/taints are configured"
               )
           }
@@ -460,7 +451,6 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
           %{
             "infraReady" => "Unknown",
             "matchingNodes" => 0,
-            "matchingNodesNames" => "[]",
             "message" => "Unable to evaluate scheduling selectors against cluster nodes: #{inspect(reason)}"
           }
       end
@@ -470,34 +460,8 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
       %{
         "infraReady" => "Unknown",
         "matchingNodes" => 0,
-        "matchingNodesNames" => "[]",
         "message" => "Unexpected error while evaluating scheduling selectors: #{inspect(error)}"
       }
-  end
-
-  @doc false
-  def format_matching_nodes_names_for_status(node_names, max_names \\ @max_matching_node_names)
-
-  def format_matching_nodes_names_for_status(node_names, max_names)
-      when is_list(node_names) and is_integer(max_names) and max_names > 0 do
-    matching_nodes = length(node_names)
-    displayed_node_names = Enum.take(node_names, max_names)
-    matching_nodes_omitted = max(matching_nodes - length(displayed_node_names), 0)
-
-    %{
-      matching_nodes: matching_nodes,
-      matching_nodes_names: format_matching_nodes_names(displayed_node_names, matching_nodes_omitted)
-    }
-  end
-
-  def format_matching_nodes_names_for_status(node_names, _max_names) when is_list(node_names) do
-    format_matching_nodes_names_for_status(node_names, @max_matching_node_names)
-  end
-
-  defp format_matching_nodes_names(displayed_node_names, omitted_nodes) do
-    suffix = if omitted_nodes > 0, do: ",...", else: ""
-
-    "[" <> Enum.join(displayed_node_names, ",") <> suffix <> "]"
   end
 
   defp infra_ready_condition_status(%{"infraReady" => "True"}), do: "True"
@@ -558,6 +522,96 @@ defmodule FlameK8sController.Handler.FlamePoolHandler do
     end
   rescue
     error -> {:error, error}
+  end
+
+  defp maybe_refresh_pool_runners(nil, _resource, _action), do: :ok
+  defp maybe_refresh_pool_runners(_conn, _resource, :add), do: :ok
+
+  defp maybe_refresh_pool_runners(conn, resource, _action) do
+    namespace = get_in(resource, ["metadata", "namespace"]) || "default"
+    pool_name = get_in(resource, ["metadata", "name"])
+
+    case list_runners_in_namespace(conn, namespace) do
+      {:ok, runners} ->
+        runners_to_refresh =
+          Enum.filter(runners, fn runner ->
+            runner_pool_ref = get_in(runner, ["spec", "poolRef"]) || "default-pool"
+            runner_phase = get_in(runner, ["status", "phase"])
+
+            runner_pool_ref == pool_name and
+              runner_phase in ["Pending", "NotProvisioned"] and
+              not deleting_resource?(runner)
+          end)
+
+        Enum.each(runners_to_refresh, fn runner ->
+          runner_name = get_in(runner, ["metadata", "name"])
+
+          case K8s.Client.delete("v1", "Pod", namespace: namespace, name: runner_name)
+               |> K8s.Client.put_conn(conn)
+               |> K8s.Client.run() do
+            {:ok, _} ->
+              Logger.info(
+                "Deleted runner pod #{namespace}/#{runner_name} to refresh FlamePool #{pool_name} changes"
+              )
+
+            {:error, reason} ->
+              if pod_not_found_error?(reason) do
+                :ok
+              else
+                Logger.warning(
+                  "Failed to refresh runner pod #{namespace}/#{runner_name} for FlamePool #{pool_name}: #{inspect(reason)}"
+                )
+              end
+          end
+
+          mark_runner_for_pool_refresh(conn, runner)
+        end)
+
+        if runners_to_refresh != [] do
+          Logger.info(
+            "Refreshed #{length(runners_to_refresh)} pending/not-provisioned runner pod(s) for FlamePool #{namespace}/#{pool_name}"
+          )
+        end
+
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Unable to list FlameRunner resources to refresh FlamePool #{namespace}/#{pool_name}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
+  defp pod_not_found_error?(%K8s.Client.APIError{reason: "NotFound"}), do: true
+  defp pod_not_found_error?(%{reason: "NotFound"}), do: true
+  defp pod_not_found_error?(%{status: 404}), do: true
+  defp pod_not_found_error?(_), do: false
+
+  defp mark_runner_for_pool_refresh(conn, runner) do
+    previous_status = Map.get(runner, "status", %{})
+
+    refreshed_status =
+      previous_status
+      |> Map.put("phase", "NotProvisioned")
+      |> Map.put("reason", "PoolUpdated")
+      |> Map.put("message", "Runner pod refresh requested due to FlamePool update")
+      |> Map.put("lastUpdateTime", DateTime.utc_now() |> DateTime.to_iso8601())
+
+    runner
+    |> Map.put("status", refreshed_status)
+    |> Bonny.Resource.apply_status(conn)
+  rescue
+    error ->
+      namespace = get_in(runner, ["metadata", "namespace"]) || "default"
+      runner_name = get_in(runner, ["metadata", "name"]) || "unknown"
+
+      Logger.warning(
+        "Failed to patch FlameRunner status for pool refresh #{namespace}/#{runner_name}: #{inspect(error)}"
+      )
+
+      :noop
   end
 
   defp deleting_resource?(resource) do

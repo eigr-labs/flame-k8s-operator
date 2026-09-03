@@ -6,10 +6,10 @@ metadata:
   namespace: default
 spec:
   scheduling:
-    provider: karpenter
-    class: gpu
-    lifecycle: spot
-    architecture: amd64
+    #provider: karpenter
+    #class: gpu
+    #lifecycle: spot
+    #architecture: amd64
     priority: high
   podTemplate:
     spec:

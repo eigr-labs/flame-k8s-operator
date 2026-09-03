@@ -139,7 +139,6 @@ If your cluster uses different labels/taints, use `spec.podTemplate.spec` for ex
 `status.schedulingFeedback` includes:
 
 - `matchingNodes`: number of matching nodes
-- `matchingNodesNames`: bracketed list used by list column (example: `[node-x,node-y,node-z,...]`)
 
 Deletion behavior:
 
@@ -182,6 +181,7 @@ Runner GC scheduler env:
 
 - `FLAME_RUNNER_GC_INTERVAL_MS` (default `30000`)
 - `FLAME_RUNNER_RETENTION_LIMIT` (default `5`)
+- `FLAME_RUNNER_PENDING_TTL_SECONDS` (default `3600`, set `0` to disable)
 
 The operator will ensure that the referenced Secret exists in the workload namespace before admitting the workload or creating runner pods.
 

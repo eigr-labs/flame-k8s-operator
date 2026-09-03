@@ -122,7 +122,7 @@ Quick summary columns are also available:
 kubectl get flamepool custom-pool-example -n default
 ```
 
-Look at `InfraReady` and `MatchingNodes` (format `[node-a,node-b,node-c,...]`, capped at 3 names).
+Look at `InfraReady` and `MatchingNodes` (node count).
 
 Look at status fields:
 

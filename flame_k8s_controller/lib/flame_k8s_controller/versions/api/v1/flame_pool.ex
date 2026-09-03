@@ -126,9 +126,6 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
                     matchingNodes: %{
                       type: :integer
                     },
-                    matchingNodesNames: %{
-                      type: :string
-                    },
                     message: %{
                       type: :string
                     }
@@ -191,9 +188,9 @@ defmodule FlameK8sController.Versions.Api.V1.FlamePool do
         },
         %{
           name: "MatchingNodes",
-          type: :string,
-          jsonPath: ".status.schedulingFeedback.matchingNodesNames",
-          description: "Comma-separated node names matching resolved scheduling selectors"
+          type: :integer,
+          jsonPath: ".status.schedulingFeedback.matchingNodes",
+          description: "Number of nodes matching resolved scheduling selectors"
         },
         %{
           name: "Age",
