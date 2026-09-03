@@ -22,9 +22,12 @@ defmodule FlameK8sController.Application do
   defp children(:test), do: []
 
   defp children(env) do
+    conn = FlameK8sController.K8sConn.get!(env)
+
     [
       {FlameK8sController.Operator,
-       conn: FlameK8sController.K8sConn.get!(env), enable_leader_election: true},
+       conn: conn, enable_leader_election: true},
+      {FlameK8sController.RunnerGcScheduler, conn: conn},
       {Bandit,
        plug: FlameK8sController.Router,
        port: @port,

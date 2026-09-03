@@ -176,6 +176,9 @@ spec:
                 poolNamespace:
                   description: Namespace where the referenced FlamePool was resolved
                   type: string
+                poolRef:
+                  description: Reference to the FlamePool used to build the runner
+                  type: string
                 reason:
                   description: Machine-readable reason for the current phase
                   type: string

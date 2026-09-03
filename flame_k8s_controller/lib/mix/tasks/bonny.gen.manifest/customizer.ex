@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Bonny.Gen.Manifest.FlameK8sControllerCustomizer do
         Access.filter(&(&1["name"] == "flame-controller")),
         Access.key("env", [])
       ],
-      &(&1 ++ [release_cookie_env()])
+      &(&1 ++ [release_cookie_env(), gc_interval_env()])
     )
     |> update_in(
       ["spec", "template", "spec", Access.key("volumes", [])],
@@ -175,6 +175,9 @@ defmodule Mix.Tasks.Bonny.Gen.Manifest.FlameK8sControllerCustomizer do
     end)
   end
 
+  # fallback
+  def override(resource), do: IO.inspect(resource, label: "Customizer Overrides")
+
   defp release_cookie_env do
     %{
       "name" => "RELEASE_COOKIE",
@@ -187,6 +190,10 @@ defmodule Mix.Tasks.Bonny.Gen.Manifest.FlameK8sControllerCustomizer do
     }
   end
 
-  # fallback
-  def override(resource), do: IO.inspect(resource, label: "Customizer Overrides")
+  defp gc_interval_env do
+    %{
+      "name" => "FLAME_RUNNER_GC_INTERVAL_MS",
+      "value" => System.get_env("FLAME_RUNNER_GC_INTERVAL_MS", "30000")
+    }
+  end
 end

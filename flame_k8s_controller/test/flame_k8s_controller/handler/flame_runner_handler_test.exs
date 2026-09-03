@@ -145,6 +145,22 @@ defmodule FlameK8sController.Handler.FlameRunnerHandlerTest do
     end
   end
 
+  describe "runner retention" do
+    test "defaults to retaining five completed runners per parent and honors overrides" do
+      previous = System.get_env("FLAME_RUNNER_RETENTION_LIMIT")
+      System.delete_env("FLAME_RUNNER_RETENTION_LIMIT")
+
+      on_exit(fn ->
+        if is_nil(previous), do: System.delete_env("FLAME_RUNNER_RETENTION_LIMIT"), else: System.put_env("FLAME_RUNNER_RETENTION_LIMIT", previous)
+      end)
+
+      assert FlameRunnerHandler.runner_retention_limit() == 5
+
+      System.put_env("FLAME_RUNNER_RETENTION_LIMIT", "2")
+      assert FlameRunnerHandler.runner_retention_limit() == 2
+    end
+  end
+
   defp base_axn(resource, action) do
     Bonny.Axn.new!(
       conn: nil,
