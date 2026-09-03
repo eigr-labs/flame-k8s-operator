@@ -87,92 +87,86 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
 
   @behaviour Pluggable
   @finalizer_id "flame.org/flamerunner-cleanup"
-
-  def finalizer_id, do: @finalizer_id
+  @default_retention_limit 5
 
   @doc false
-  def cleanup(%Bonny.Axn{} = axn) do
-    resource = axn.resource
-    metadata = Map.get(resource, "metadata", %{})
-    namespace = Map.get(metadata, "namespace", "default")
-    name = Map.get(metadata, "name")
-
-    terminating_status =
-      build_phase_status(resource, :terminating, "Runner resource is terminating", %{
-        "podName" => name,
-        "retryCount" => current_retry_count(resource)
-      })
-
-    _ = apply_status_patch(axn.conn, resource, terminating_status)
-
-    case delete_runner_pod(axn.conn, namespace, name) do
-      :ok -> {:ok, Bonny.Axn.success_event(axn, message: "Runner pod cleanup completed")}
-      {:error, _reason} -> {:error, Bonny.Axn.failure_event(axn, message: "Failed to cleanup runner pod")}
+  def runner_retention_limit do
+    case System.get_env("FLAME_RUNNER_RETENTION_LIMIT") do
+      nil -> @default_retention_limit
+      "" -> @default_retention_limit
+      value ->
+        case Integer.parse(value) do
+          {parsed, ""} when parsed >= 0 -> parsed
+          _ -> @default_retention_limit
+        end
     end
   end
 
-  @impl Pluggable
-  def init(_opts), do: nil
+  @doc false
+  def garbage_collect_completed_runners(conn, namespace, current_resource) do
+    limit = runner_retention_limit()
 
-  @impl Pluggable
-  def call(
-        %Bonny.Axn{action: action, resource: %{"metadata" => %{"deletionTimestamp" => _}}} = axn,
-        nil
-      )
-      when action in [:add, :modify] do
-    %Bonny.Axn{resource: resource} = axn
-
-    axn
-    |> update_runner_status(resource, :terminating, "Runner resource is terminating")
-    |> Bonny.Axn.success_event(message: "Runner resource is terminating")
-  end
-
-  @impl Pluggable
-  def call(%Bonny.Axn{action: action} = axn, nil) when action in [:add, :modify] do
-    %Bonny.Axn{resource: resource, conn: conn} = axn
-
-    with {:ok, args} <- parse_runner_args(resource),
-         :ok <- ensure_runner_cookie_secret(conn, args),
-         {:ok, pool_config, pool_resolution} <- fetch_pool_config(conn, args),
-          {:ok, pod_manifest} <- build_pod_manifest(args, pool_config),
-          :ok <- validate_runner_pod_manifest(pod_manifest) do
-      axn
-      |> Bonny.Axn.register_descendant(pod_manifest)
-      |> update_runner_status(resource, :not_provisioned, nil, Map.put(pool_resolution, "retryCount", 0))
-      |> Bonny.Axn.success_event()
+    if limit <= 0 do
+      Logger.info("FlameRunner retention GC skipped: limit is #{limit}")
+      :ok
     else
-      {:error, reason} ->
-        Logger.error("Failed to process FlameRunner: #{inspect(reason)}")
+      current_name = get_in(current_resource, ["metadata", "name"])
+      current_parent = get_in(current_resource, ["spec", "parentRef", "name"]) || get_in(current_resource, ["spec", :parentRef, :name])
 
-        axn
-        |> update_runner_status(resource, :failed, reason)
-        |> Bonny.Axn.failure_event(message: reason)
-    end
-  end
+      case K8s.Client.list("flame.org/v1", "FlameRunner", namespace: namespace)
+           |> K8s.Client.put_conn(conn)
+           |> K8s.Client.run() do
+        {:ok, %{"items" => items}} ->
+          candidates =
+            items
+            |> Enum.filter(fn runner ->
+              runner_parent = get_in(runner, ["spec", "parentRef", "name"]) || get_in(runner, ["spec", :parentRef, :name])
+              phase = get_in(runner, ["status", "phase"])
+              runner_name = get_in(runner, ["metadata", "name"])
+              runner_parent == current_parent and phase in ["Succeeded", "Failed"] and runner_name != current_name and not deleting_resource?(runner)
+            end)
+            |> Enum.sort_by(fn runner ->
+              get_in(runner, ["metadata", "creationTimestamp"]) || "0000-01-01T00:00:00Z"
+            end, :desc)
+            |> Enum.drop(limit)
 
-  @impl Pluggable
-  def call(%Bonny.Axn{action: :delete} = axn, nil) do
-    Bonny.Axn.success_event(axn)
-  end
+          Logger.info(
+            "FlameRunner retention GC in #{namespace}: parent=#{current_parent || "unknown"} limit=#{limit} candidates=#{length(candidates)}"
+          )
 
-  @impl Pluggable
-  def call(%Bonny.Axn{action: :reconcile} = axn, nil) do
-    %Bonny.Axn{resource: resource, conn: conn} = axn
+          Enum.each(candidates, fn runner ->
+            runner_name = get_in(runner, ["metadata", "name"])
 
-    if deleting_resource?(resource) do
-      axn
-      |> update_runner_status(resource, :terminating, "Runner resource is terminating")
-      |> Bonny.Axn.success_event(message: "Runner resource is terminating")
-    else
-      case get_runner_pod_status(conn, resource) do
-        {:ok, pod_status} ->
-          axn
-          |> update_runner_status_from_pod(resource, pod_status)
-          |> Bonny.Axn.success_event()
+            case K8s.Client.delete("flame.org/v1", "FlameRunner", namespace: namespace, name: runner_name)
+                 |> K8s.Client.put_conn(conn)
+                 |> K8s.Client.run() do
+              {:ok, _} ->
+                Logger.info("Deleted stale completed FlameRunner #{namespace}/#{runner_name} due to retention policy")
+
+              {:error, reason} ->
+                Logger.warning("Failed to delete stale completed FlameRunner #{namespace}/#{runner_name}: #{inspect(reason)}")
+            end
+          end)
+
+          :ok
 
         {:error, reason} ->
-          handle_missing_runner_pod(axn, resource, reason)
+          Logger.warning("Unable to garbage collect completed runners in #{namespace}: #{inspect(reason)}")
+          :ok
       end
+    end
+  end
+
+  @doc false
+  def maybe_gc_completed_runners(conn, resource) do
+    phase = get_in(resource, ["status", "phase"])
+
+    if phase in ["Succeeded", "Failed"] do
+      namespace = get_in(resource, ["metadata", "namespace"]) || "default"
+      Logger.info("Checking retention GC for completed FlameRunner #{namespace}/#{get_in(resource, ["metadata", "name"])} (phase=#{phase})")
+      garbage_collect_completed_runners(conn, namespace, resource)
+    else
+      :ok
     end
   end
 
@@ -233,7 +227,7 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
           "FlamePool '#{pool_ref}' not found in namespaces #{inspect(namespaces_to_try)}, using minimal defaults"
         )
 
-        {:ok, minimal_pool_config(), pool_resolution(pool_ref, nil, true)}
+        {:ok, minimal_pool_config(), pool_resolution(pool_ref, ns, true)}
     end
   end
 
@@ -342,11 +336,12 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
       "phase" => phase,
       "reason" => reason,
       "podName" => pod_status["name"],
-      "podIP" => pod_status["podIP"],
       "conditions" => conditions,
       "message" => message,
       "lastUpdateTime" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
+
+    status = put_if_present(status, "podIP", pod_status["podIP"])
 
     status =
       if start_time = pod_status["startTime"] do
@@ -638,6 +633,101 @@ defmodule FlameK8sController.Handler.FlameRunnerHandler do
 
       _ ->
         []
+    end
+  end
+
+  @doc false
+  def finalizer_id, do: @finalizer_id
+
+  @doc false
+  def cleanup(%Bonny.Axn{} = axn) do
+    resource = axn.resource
+    metadata = Map.get(resource, "metadata", %{})
+    namespace = Map.get(metadata, "namespace", "default")
+    name = Map.get(metadata, "name")
+
+    Logger.info("Finalizer cleanup triggered for FlameRunner #{namespace}/#{name}")
+
+    terminating_status =
+      build_phase_status(resource, :terminating, "Runner resource is terminating", %{
+        "podName" => name,
+        "retryCount" => current_retry_count(resource)
+      })
+
+    _ = apply_status_patch(axn.conn, resource, terminating_status)
+
+    case delete_runner_pod(axn.conn, namespace, name) do
+      :ok -> {:ok, Bonny.Axn.success_event(axn, message: "Runner pod cleanup completed")}
+      {:error, _reason} -> {:error, Bonny.Axn.failure_event(axn, message: "Failed to cleanup runner pod")}
+    end
+  end
+
+  @impl Pluggable
+  def init(_opts), do: nil
+
+  @impl Pluggable
+  def call(
+        %Bonny.Axn{action: action, resource: %{"metadata" => %{"deletionTimestamp" => _}}} = axn,
+        nil
+      )
+      when action in [:add, :modify] do
+    %Bonny.Axn{resource: resource} = axn
+
+    axn
+    |> update_runner_status(resource, :terminating, "Runner resource is terminating")
+    |> Bonny.Axn.success_event(message: "Runner resource is terminating")
+  end
+
+  @impl Pluggable
+  def call(%Bonny.Axn{action: action} = axn, nil) when action in [:add, :modify] do
+    %Bonny.Axn{resource: resource, conn: conn} = axn
+
+    with {:ok, args} <- parse_runner_args(resource),
+         :ok <- ensure_runner_cookie_secret(conn, args),
+         {:ok, pool_config, pool_resolution} <- fetch_pool_config(conn, args),
+         {:ok, pod_manifest} <- build_pod_manifest(args, pool_config),
+         :ok <- validate_runner_pod_manifest(pod_manifest) do
+      axn
+      |> Bonny.Axn.register_descendant(pod_manifest)
+      |> update_runner_status(resource, :not_provisioned, nil, Map.put(pool_resolution, "retryCount", 0))
+      |> Bonny.Axn.success_event()
+    else
+      {:error, reason} ->
+        Logger.error("Failed to process FlameRunner: #{inspect(reason)}")
+
+        axn
+        |> update_runner_status(resource, :failed, reason)
+        |> Bonny.Axn.failure_event(message: reason)
+    end
+  end
+
+  @impl Pluggable
+  def call(%Bonny.Axn{action: :delete} = axn, nil) do
+    Bonny.Axn.success_event(axn)
+  end
+
+  @impl Pluggable
+  def call(%Bonny.Axn{action: :reconcile} = axn, nil) do
+    %Bonny.Axn{resource: resource, conn: conn} = axn
+
+    if deleting_resource?(resource) do
+      Logger.info("FlameRunner is marked for deletion: #{get_in(resource, ["metadata", "namespace"])}/#{get_in(resource, ["metadata", "name"])}")
+
+      axn
+      |> update_runner_status(resource, :terminating, "Runner resource is terminating")
+      |> Bonny.Axn.success_event(message: "Runner resource is terminating")
+    else
+      case get_runner_pod_status(conn, resource) do
+        {:ok, pod_status} ->
+          updated_axn =
+            axn
+            |> update_runner_status_from_pod(resource, pod_status)
+
+          Bonny.Axn.success_event(updated_axn)
+
+        {:error, reason} ->
+          handle_missing_runner_pod(axn, resource, reason)
+      end
     end
   end
 end

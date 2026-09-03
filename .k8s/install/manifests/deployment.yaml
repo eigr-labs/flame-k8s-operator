@@ -43,6 +43,8 @@ spec:
                 secretKeyRef:
                   key: cookie
                   name: flame-erlang-cookie
+            - name: FLAME_RUNNER_GC_INTERVAL_MS
+              value: '30000'
           image: ghcr.io/eigr-labs/flame-k8s-controller:dev-local
           name: flame-controller
           ports:
