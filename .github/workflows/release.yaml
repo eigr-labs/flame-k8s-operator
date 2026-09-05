@@ -121,15 +121,13 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
-          make generate-k8s-manifests version="$VERSION" registry="ghcr.io/eigr-labs"
+          make generate-k8s-manifests version="$TAG" registry="ghcr.io/eigr-labs"
 
       - name: Validate generated deployment image
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
-          grep -q "ghcr.io/eigr-labs/flame-k8s-controller:${VERSION}" .k8s/install/manifests/deployment.yaml
+          grep -q "ghcr.io/eigr-labs/flame-k8s-controller:${TAG}" .k8s/install/manifests/deployment.yaml
 
       - name: Pack manifests
         run: |
