@@ -1,9 +1,9 @@
-version ?= 0.1.1
+version ?= 0.1.2
 registry ?= ghcr.io/eigr-labs
 cluster_name ?= flame-local
 kind_config ?= examples/flame_example/kind-cluster.yml
 operator_namespace ?= flame
-example_image ?= eigr/flame-parent-example:1.1.2
+example_image ?= eigr/flame-parent-example:1.1.3
 cookie_secret_name ?= flame-erlang-cookie
 
 operator-image = ${registry}/flame-k8s-controller:${version}
