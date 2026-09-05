@@ -194,12 +194,15 @@ Now you can start scaling your applications with [Flame](https://github.com/phoe
 
 ## Configuration
 
-TODO
+The operator manages `FlamePool` resources, which define the reusable runner profiles used by workloads annotated with `flame.org/pool-config-ref`. In practice, a pool is the configuration contract that tells the controller how to schedule and build runner pods for a workload.
+
+Each pool controls the scheduling class, architecture, priority, and pod template that will be used when a Flame-enabled application needs to spawn Kubernetes runners.
 
 ### 1. Flame Runner Pool
 
-The Flame k8s Controller gives you the possibility to configure different runner profiles. These profiles will be used when creating PODs to run Runners in Kubernetes.
-To configure a new Runner Pool, simply define the following yaml file and apply it to the Kubernetes cluster.
+A `FlamePool` is not a raw pod definition; it is a higher-level profile that the controller translates into runner pod specifications. It allows you to standardize the runtime characteristics of your workers, such as CPU, memory, node class, lifecycle, and architecture, while keeping the application configuration simple.
+
+To configure a new Runner Pool, define the following YAML and apply it to the Kubernetes cluster.
 
 ```yaml
 # my-runner.yaml
@@ -266,6 +269,25 @@ kubectl get flamepools -A
 ```
 
 Columns include `InfraReady` and `MatchingNodes` (node count).
+
+To follow the actual runner pods created by the controller, inspect the `FlameRunner` CRDs directly:
+
+```sh
+kubectl get runners -A
+kubectl get flamerunners -A
+kubectl describe flamerunner <runner-name> -n <namespace>
+```
+
+This gives you a higher-level view of each runner lifecycle: whether the controller has resolved scheduling, created the pod, and whether the pod has reached a healthy or terminal state. In practice, the `status` field of a `FlameRunner` is the source of truth for the runner lifecycle, while `status.conditions` is the easiest place to understand what the controller has already validated.
+
+Common things to look for:
+
+- `status.phase` or similar lifecycle state such as `Pending`, `Running`, `Succeeded`, `Failed`, or `Terminating`
+- `status.conditions` with entries like `Ready`, `SchedulingResolved`, `InfrastructureReady`, `PodCreated`, or `RunnerReady`
+- `status.message` and `status.reason` when the controller reports why a runner could not be scheduled or started
+- `metadata.name` + `metadata.namespace` to correlate the CRD with the underlying Kubernetes pod
+
+If a runner is stuck, inspect the CRD and then the underlying pod: `kubectl get pod -n <namespace> -l flame.org/runner=<runner-name>` or `kubectl logs <pod-name> -n <namespace>` when the pod exists.
 
 Once this is done, simply add the annotation `flame.org/pool-config-ref` to your Deployment file. Example:
 
@@ -335,3 +357,14 @@ spec:
               cpu: 50m
               memory: 128Mi
 ```
+
+### Compatibility and validation
+
+The operator and runtime image are currently validated on the following Kubernetes environments and architecture:
+
+| Environment | Status | Supported architecture |
+| ---         | ---    | ---                    |
+| Kind        | Tested | amd64                  |
+| EKS         | Tested | amd64                  |
+
+This project is currently validated for `amd64`. Support for other architectures is planned and will be added in upcoming releases as validation expands.

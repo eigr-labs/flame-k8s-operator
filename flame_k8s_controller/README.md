@@ -185,6 +185,17 @@ Runner GC scheduler env:
 
 The operator will ensure that the referenced Secret exists in the workload namespace before admitting the workload or creating runner pods.
 
+### Compatibility and validation
+
+The operator and runtime image are currently validated on the following Kubernetes environments and architecture:
+
+| Environment | Status | Supported architecture |
+| ---         | ---    | ---                    |
+| Kind        | Tested | amd64                  |
+| EKS         | Tested | amd64                  |
+
+This project is currently validated for `amd64`. Support for other architectures is planned and will be added in upcoming releases as validation expands.
+
 ## Testing
 
 Run unit tests:
