@@ -93,11 +93,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api \
-            --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            /orgs/eigr-labs/packages/container/flame-k8s-controller \
-            -f visibility=public
+          set -e
+
+          package_name="flame-k8s-controller"
+          endpoints=(
+            "/orgs/eigr-labs/packages/container/${package_name}"
+            "/users/${{ github.actor }}/packages/container/${package_name}"
+            "/user/packages/container/${package_name}"
+          )
+
+          for endpoint in "${endpoints[@]}"; do
+            echo "Trying GHCR visibility update via: ${endpoint}"
+            if gh api \
+              --method PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "$endpoint" \
+              -f visibility=public >/dev/null 2>&1; then
+              echo "Package visibility changed to public via ${endpoint}"
+              exit 0
+            fi
+          done
+
+          echo "Could not update GHCR package visibility automatically; verify the package owner and visibility manually."
+          exit 0
 
       - name: Generate release manifests for tagged image
         env:
