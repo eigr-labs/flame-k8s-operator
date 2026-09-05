@@ -2,7 +2,7 @@ defmodule FlameK8sController.MixProject do
   use Mix.Project
 
   @app :flame_k8s_controller
-  @version "0.1.0"
+  @version "0.1.1"
 
   def project do
     [

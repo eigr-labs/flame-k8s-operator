@@ -89,6 +89,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Set GHCR package visibility to public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            /orgs/eigr-labs/packages/container/flame-k8s-controller \
+            -f visibility=public
+
       - name: Generate release manifests for tagged image
         env:
           TAG: ${{ github.ref_name }}

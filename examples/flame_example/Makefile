@@ -1,4 +1,4 @@
-version=1.1.1
+version=1.1.2
 registry=eigr
 
 image=${registry}/flame-parent-example:${version}

@@ -4,8 +4,40 @@ Advanced [Flame](https://github.com/phoenixframework/flame) [k8s](https://kubern
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `flame_k8s` to your list of dependencies in `mix.exs`:
+### Install the operator
+
+Use the release assets published for each GitHub release. This is the recommended installation flow for real clusters and does not require cloning the repository.
+
+Latest release:
+
+```bash
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/latest/download/install-operator.sh \
+  -o /tmp/install-operator.sh
+bash /tmp/install-operator.sh --namespace flame
+```
+
+Pinned release tag:
+
+```bash
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/install-operator.sh \
+  -o /tmp/install-operator.sh
+bash /tmp/install-operator.sh --tag v0.1.0 --namespace flame
+```
+
+The installer downloads the published manifest bundle, ensures the Erlang cookie secret exists, waits for the CRDs to become established, and applies the operator manifests.
+
+If you need to apply raw YAML directly, use the files published in the GitHub Release assets instead of cloning the repo:
+
+```bash
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/namespace.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamepool.crd.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamerunner.crd.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/deployment.yaml
+```
+
+### Install the Elixir backend library
+
+If [available in Hex](https://hex.pm/docs/publish), the package can be installed by adding `flame_k8s` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -15,18 +47,11 @@ def deps do
 end
 ```
 
-> **_NOTE:_** You need to install our Kubernetes Controller in the Kubernetes where you want to run your application. Follow the instructions below
+> **_NOTE:_** The library and the Kubernetes operator are separate pieces. Install the operator in the cluster first, then add the backend library to your Elixir app.
 
-## Local End-to-End Validation (Before Publish)
+### Local end-to-end validation (development only)
 
-You can validate the full workflow on a developer machine before publishing:
-
-- compile and run tests for all apps
-- build local operator and example images
-- create local kind cluster
-- generate and apply operator manifests
-- apply CRD examples and example application
-- verify deployed resources
+These commands are for contributors and local validation. They are not the installation flow for end users.
 
 Run from repository root:
 
@@ -89,7 +114,7 @@ make local-e2e cluster_name=my-cluster operator_namespace=flame version=dev-loca
 
 ### Install Kubernetes Controller
 
-To install flame-k8s kubernetes controller, just download the manifest from the [release page](https://github.com/eigr-labs/flame-k8s-operator/releases) and apply it to your cluster.
+To install the Kubernetes controller, use the GitHub Release asset installer shown above; do not rely on a repository checkout for normal deployment.
 
 ## Usage
 

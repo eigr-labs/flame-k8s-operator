@@ -43,18 +43,28 @@ end
 
 This backend requires the operator and CRDs installed in the target cluster.
 
-Option 1: use project release manifest.
+Use the release assets published with each GitHub release. No repository clone is required.
+
+Latest release:
 
 ```bash
-kubectl apply -f <release-manifest-url>
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/latest/download/install-operator.sh \
+  -o /tmp/install-operator.sh
+bash /tmp/install-operator.sh --namespace flame
 ```
 
-Option 2: generate manifests from this repository and apply with kustomize.
+Pinned release tag:
 
 ```bash
-make generate-k8s-manifests
-kubectl apply -k .k8s/install/manifests
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.1/install-operator.sh \
+  -o /tmp/install-operator.sh
+bash /tmp/install-operator.sh --tag v0.1.1 --namespace flame
 ```
+
+This installer downloads the release bundle, creates or reuses the Erlang cookie secret,
+waits for CRDs to be established, and applies the operator manifests in the target namespace.
+
+If you need to apply individual YAML manifests directly, use the release asset files instead of cloning the repository.
 
 ## Generate A FLAME-Ready Deployment
 

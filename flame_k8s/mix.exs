@@ -2,7 +2,7 @@ defmodule FLAME.K8s.MixProject do
   use Mix.Project
 
   @app :flame_k8s
-  @version "0.1.0"
+  @version "0.1.1"
   @source_url "https://github.com/eigr-labs/flame-k8s-operator/tree/main/flame_k8s"
   @description "Kubernetes backend integration for FLAME"
 

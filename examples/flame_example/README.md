@@ -52,20 +52,27 @@ integration code.
 
 ## Install The Operator In Kubernetes
 
-There are two common paths.
+Use the operator manifest bundle published in the GitHub Release assets. This is the recommended installation path for a real cluster and does not require cloning the repository.
 
-### Option 1: From release manifest
-
-Use the published install manifest from the project releases and apply it to the
-cluster.
+Latest release:
 
 ```bash
-kubectl apply -f <release-manifest-url>
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/latest/download/install-operator.sh \
+  -o /tmp/install-operator.sh
+bash /tmp/install-operator.sh --namespace flame
 ```
 
-### Option 2: Generate manifests locally (repository workflow)
+Pinned release tag:
 
-From repository root:
+```bash
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.1/install-operator.sh \
+  -o /tmp/install-operator.sh
+bash /tmp/install-operator.sh --tag v0.1.1 --namespace flame
+```
+
+This installer downloads the published manifest bundle, creates or reuses the Erlang cookie secret, waits for CRDs to be established, and applies the operator manifests in the target namespace.
+
+If you want to work from the repository locally instead, the developer-only path is:
 
 ```bash
 make generate-k8s-manifests
@@ -93,12 +100,12 @@ The pool example includes an optional high-level scheduling block:
 
 ```yaml
 spec:
-	scheduling:
-		provider: karpenter
-		class: gpu
-		lifecycle: spot
-		architecture: amd64
-		priority: high
+  scheduling:
+	provider: karpenter
+	class: gpu
+	lifecycle: spot
+	architecture: amd64
+	priority: high
 ```
 
 The operator translates this into Pod scheduling defaults (selectors,
