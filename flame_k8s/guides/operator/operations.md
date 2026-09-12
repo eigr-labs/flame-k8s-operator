@@ -36,6 +36,26 @@ Focus on:
 - `status.schedulingFeedback`
 - `status.conditions`
 
+## Argo CD health
+
+`FlamePool` is the best default target for Argo CD custom health checks because it is long-lived and declarative. Its `status.phase`, `status.conditions`, and `status.observedGeneration` provide enough information for a reliable health script.
+
+`FlameRunner` is ephemeral. By default, generated runners receive `argocd.argoproj.io/ignore-healthcheck: "true"` so transient provisioning and cleanup do not degrade the Argo CD application during normal FLAME operation.
+
+The operator installation bundle includes a default Argo CD health customization manifest at `.k8s/install/argocd/argocd-cm-flame-health.yaml`. It lives outside the operator Kustomize directory on purpose, so GitOps installs of the operator do not try to manage `argocd-cm` as part of the operator application. The installer tries to merge it into `argocd-cm` automatically when Argo CD is detected in the cluster.
+
+If you want Argo CD to evaluate runner health explicitly, set the workload annotation below to `"false"`. The installer-provided `FlameRunner` health script becomes active for tracked runners, and you can still override it later in `argocd-cm` if your environment needs different semantics.
+
+```yaml
+flame.org/argocd-ignore-runner-healthcheck: "false"
+```
+
+If you are not using the installer script, merge the defaults manually with:
+
+```bash
+kubectl -n argocd apply --server-side --field-manager=flame-k8s-operator-install -f .k8s/install/argocd/argocd-cm-flame-health.yaml
+```
+
 ## Common checks
 
 1. CRDs established:
