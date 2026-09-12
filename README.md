@@ -19,9 +19,9 @@ bash /tmp/install-operator.sh --namespace flame
 Pinned release tag:
 
 ```bash
-curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/install-operator.sh \
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/install-operator.sh \
   -o /tmp/install-operator.sh
-bash /tmp/install-operator.sh --tag v0.1.0 --namespace flame
+bash /tmp/install-operator.sh --tag v0.1.4 --namespace flame
 ```
 
 The installer downloads the published manifest bundle, ensures the Erlang cookie secret exists, waits for the CRDs to become established, applies the operator manifests, and if Argo CD is present it also merges the default FLAME health customizations into `argocd-cm`.
@@ -29,10 +29,10 @@ The installer downloads the published manifest bundle, ensures the Erlang cookie
 If you need to apply raw YAML directly, use the files published in the GitHub Release assets instead of cloning the repo:
 
 ```bash
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/namespace.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamepool.crd.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamerunner.crd.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/deployment.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/namespace.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/flamepool.crd.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/flamerunner.crd.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/deployment.yaml
 ```
 
 For clusters with Argo CD, the release assets also include `argocd-cm-flame-health.yaml` as a separate asset outside the operator Kustomize directory. The installer applies it automatically when `argocd-cm` exists. If you install manually, merge that manifest yourself into the Argo CD namespace.
@@ -44,7 +44,7 @@ If [available in Hex](https://hex.pm/docs/publish), the package can be installed
 ```elixir
 def deps do
   [
-    {:flame_k8s, "~> 0.1.0"}
+    {:flame_k8s, "~> 0.1.4"}
   ]
 end
 ```
@@ -75,7 +75,7 @@ bash scripts/install-operator.sh --manifest-dir .k8s/install/manifests --namespa
 Release/tag based install for end users:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eigr-labs/flame-k8s-operator/v0.1.0/scripts/install-operator.sh | bash -s -- --tag v0.1.0 --namespace flame
+curl -fsSL https://raw.githubusercontent.com/eigr-labs/flame-k8s-operator/v0.1.4/scripts/install-operator.sh | bash -s -- --tag v0.1.4 --namespace flame
 ```
 
 If `--tag` is omitted, the installer tries to resolve the latest GitHub release automatically.
@@ -153,7 +153,7 @@ spec:
         flame.org/otp-app: "my_app_release_name"
     spec:
       containers:
-        - image: eigr/flame-parent-example:1.1.1
+        - image: eigr/flame-parent-example:0.1.4
           name: flame-parent-example
           resources:
             limits:
@@ -392,7 +392,7 @@ spec:
         flame.org/pool-config-ref: "my-runner-pool"
     spec:
       containers:
-        - image: eigr/flame-parent-example:1.1.1
+        - image: eigr/flame-parent-example:0.1.4
 ...        
 ```
 
