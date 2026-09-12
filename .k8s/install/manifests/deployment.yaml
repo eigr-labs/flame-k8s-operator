@@ -45,7 +45,7 @@ spec:
                   name: flame-erlang-cookie
             - name: FLAME_RUNNER_GC_INTERVAL_MS
               value: '30000'
-          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.2
+          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.4
           name: flame-controller
           ports:
             - containerPort: 9001
@@ -78,7 +78,7 @@ spec:
               value: 'true'
             - name: FLAME_BOOTSTRAP_TLS_SECRET
               value: flame-webhook-tls
-          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.2
+          image: ghcr.io/eigr-labs/flame-k8s-controller:0.1.4
           name: init-certificates
           volumeMounts:
             - mountPath: /app/.cache/bakeware/

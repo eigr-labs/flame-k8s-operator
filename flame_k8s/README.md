@@ -56,9 +56,9 @@ bash /tmp/install-operator.sh --namespace flame
 Pinned release tag:
 
 ```bash
-curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.2/install-operator.sh \
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/install-operator.sh \
   -o /tmp/install-operator.sh
-bash /tmp/install-operator.sh --tag v0.1.2 --namespace flame
+bash /tmp/install-operator.sh --tag v0.1.4 --namespace flame
 ```
 
 This installer downloads the release bundle, creates or reuses the Erlang cookie secret,

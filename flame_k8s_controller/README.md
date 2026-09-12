@@ -38,7 +38,7 @@ bash scripts/install-operator.sh --manifest-dir .k8s/install/manifests --namespa
 Release/tag based install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eigr-labs/flame-k8s-operator/v0.1.0/scripts/install-operator.sh | bash -s -- --tag v0.1.0 --namespace flame
+curl -fsSL https://raw.githubusercontent.com/eigr-labs/flame-k8s-operator/v0.1.4/scripts/install-operator.sh | bash -s -- --tag v0.1.4 --namespace flame
 ```
 
 ### Apply Manifests (User Input)

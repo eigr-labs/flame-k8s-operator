@@ -2,7 +2,7 @@ defmodule FlameExample.MixProject do
   use Mix.Project
 
   @app :flame_example
-  @version "0.1.2"
+  @version "0.1.3"
 
   def project do
     [

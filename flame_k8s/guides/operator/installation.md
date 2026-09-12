@@ -17,9 +17,9 @@ bash /tmp/install-operator.sh --namespace flame
 Install pinned version:
 
 ```bash
-curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/install-operator.sh \
+curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/install-operator.sh \
   -o /tmp/install-operator.sh
-bash /tmp/install-operator.sh --tag v0.1.0 --namespace flame
+bash /tmp/install-operator.sh --tag v0.1.4 --namespace flame
 ```
 
 Useful flags:
@@ -48,17 +48,17 @@ The Argo CD customization manifest is intentionally stored outside `.k8s/install
 For manual apply, use release asset URLs:
 
 ```bash
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/namespace.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamepool.crd.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamerunner.crd.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/namespace.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/flamepool.crd.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/flamerunner.crd.yaml
 kubectl wait --for=condition=Established crd/flamepools.flame.org --timeout=60s
 kubectl wait --for=condition=Established crd/flamerunners.flame.org --timeout=60s
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/deployment.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/service.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/serviceaccount.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/clusterrole.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/clusterrolebinding.yaml
-kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/mutatingwebhookconfiguration.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/deployment.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/service.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/serviceaccount.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/clusterrole.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/clusterrolebinding.yaml
+kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.4/mutatingwebhookconfiguration.yaml
 ```
 
 Use this mode only if your platform cannot run the installer script.
