@@ -29,6 +29,7 @@ Optional annotations let you tune behavior:
 - `flame.org/cookie-secret-ref`
 - `flame.org/dist-auto-config`
 - `flame.org/otp-app`
+- `flame.org/argocd-ignore-runner-healthcheck`
 - `flame.org/runner-termination-timeout`
 
 ## Why this design

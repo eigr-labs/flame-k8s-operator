@@ -62,7 +62,8 @@ bash /tmp/install-operator.sh --tag v0.1.2 --namespace flame
 ```
 
 This installer downloads the release bundle, creates or reuses the Erlang cookie secret,
-waits for CRDs to be established, and applies the operator manifests in the target namespace.
+waits for CRDs to be established, applies the operator manifests in the target namespace,
+and merges the default FLAME Argo CD health customizations into `argocd-cm` when Argo CD is present.
 
 If you need to apply individual YAML manifests directly, use the release asset files instead of cloning the repository.
 
@@ -80,6 +81,14 @@ mix flame.gen.deployment \
 
 Optional flags include `--pool-config-ref`, `--otp-app`, `--cookie-secret-ref`,
 and `--runner-termination-timeout`.
+
+## Argo CD Notes
+
+- `FlamePool` is the recommended resource to evaluate with custom Argo CD health checks because it is stable and declarative.
+- Generated `FlameRunner` resources are ephemeral. By default, the workload admission flow marks them with `argocd.argoproj.io/ignore-healthcheck: "true"` so normal runner churn does not degrade the Argo CD application.
+- The operator installation bundle ships a separate Argo CD customization manifest outside the operator Kustomize directory, and the installer applies it automatically when `argocd-cm` is present. Treat that default as the baseline and override it only if you need different health semantics.
+- To opt out of that default, add `flame.org/argocd-ignore-runner-healthcheck: "false"` to the workload pod template annotations.
+- If you opt out, define a custom Argo CD health check for `FlameRunner` in `argocd-cm` based on `status.phase`, `status.reason`, `status.message`, and `status.observedGeneration`.
 
 ## Apply Example CR Instances
 

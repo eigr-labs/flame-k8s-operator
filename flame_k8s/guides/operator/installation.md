@@ -27,6 +27,8 @@ Useful flags:
 - `--tag vX.Y.Z`: install an exact release.
 - `--namespace flame`: operator namespace.
 - `--secret-name flame-erlang-cookie`: Erlang cookie secret name.
+- `--argocd-namespace argocd`: Argo CD namespace to patch when `argocd-cm` exists.
+- `--disable-argocd-health`: skip automatic Argo CD health customization.
 - `--repo owner/repo`: alternate release source.
 
 What the installer does:
@@ -37,6 +39,9 @@ What the installer does:
 4. Applies namespace and CRDs.
 5. Waits for CRDs to become `Established`.
 6. Applies operator manifests with kustomize.
+7. If Argo CD is detected, merges `.k8s/install/argocd/argocd-cm-flame-health.yaml` into `argocd-cm`.
+
+The Argo CD customization manifest is intentionally stored outside `.k8s/install/manifests`. This prevents directory-based operator installs through Kustomize or Argo CD Applications from trying to manage `argocd-cm` as part of the operator application. The manifest targets the `argocd` namespace by default. If your Argo CD installation runs in a different namespace, use `--argocd-namespace` with the installer.
 
 ## Alternative: Direct YAML apply from release assets
 
@@ -57,6 +62,8 @@ kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/downlo
 ```
 
 Use this mode only if your platform cannot run the installer script.
+
+If Argo CD is present and you install manually, also merge the release asset `argocd-cm-flame-health.yaml` into the Argo CD namespace. That asset is intentionally separate from the operator Kustomize directory. The manifest is authored for the default `argocd` namespace, so change the namespace if your Argo CD installation uses a different one.
 
 ## Why remote install is stable
 

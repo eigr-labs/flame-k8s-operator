@@ -132,6 +132,7 @@ jobs:
       - name: Pack manifests
         run: |
           tar -czf flame-k8s-manifests-${{ github.ref_name }}.tar.gz \
+            .k8s/install/argocd \
             .k8s/install/manifests \
             scripts/install-operator.sh \
             scripts/ensure-flame-cookie-secret.sh
@@ -142,6 +143,7 @@ jobs:
           generate_release_notes: true
           files: |
             flame-k8s-manifests-${{ github.ref_name }}.tar.gz
+            .k8s/install/argocd/*.yaml
             .k8s/install/manifests/*.yaml
             scripts/install-operator.sh
             scripts/ensure-flame-cookie-secret.sh

@@ -38,6 +38,7 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandlerTest do
       assert env_patch["op"] == "replace"
       assert contains_env_name?(env_patch["value"], "FLAME_POOL_CONFIG_REF")
       assert contains_env_name?(env_patch["value"], "BASE_POD")
+      assert env_value(env_patch["value"], "FLAME_ARGOCD_IGNORE_RUNNER_HEALTHCHECK") == "true"
       assert contains_env_name?(env_patch["value"], "RELEASE_DISTRIBUTION")
       assert contains_env_name?(env_patch["value"], "RELEASE_NODE")
     end
@@ -65,6 +66,34 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandlerTest do
 
       refute contains_env_name?(env_patch["value"], "RELEASE_DISTRIBUTION")
       refute contains_env_name?(env_patch["value"], "RELEASE_NODE")
+    end
+
+    test "allows opt-out of default argocd ignore-healthcheck for runners" do
+      conn =
+        admission_conn("deployments", %{
+          "template" => %{
+            "metadata" => %{
+              "annotations" => %{
+                "flame.org/enabled" => "true",
+                "flame.org/argocd-ignore-runner-healthcheck" => "false"
+              }
+            },
+            "spec" => %{
+              "containers" => [
+                %{
+                  "name" => "app",
+                  "image" => "ghcr.io/example/app:latest"
+                }
+              ]
+            }
+          }
+        })
+
+      result = MutatingControlHandler.handle(conn, nil)
+      patch_ops = decode_patch(result.response["patch"])
+      env_patch = Enum.find(patch_ops, &(&1["path"] == "/spec/template/spec/containers/0/env"))
+
+      assert env_value(env_patch["value"], "FLAME_ARGOCD_IGNORE_RUNNER_HEALTHCHECK") == "false"
     end
 
     test "adds flame env patch for statefulsets" do
@@ -137,5 +166,14 @@ defmodule FlameK8sController.Webhooks.MutatingControlHandlerTest do
 
   defp contains_env_name?(env_entries, name) do
     Enum.any?(env_entries, fn entry -> entry["name"] == name end)
+  end
+
+  defp env_value(env_entries, name) do
+    env_entries
+    |> Enum.find(fn entry -> entry["name"] == name end)
+    |> case do
+      nil -> nil
+      entry -> entry["value"]
+    end
   end
 end

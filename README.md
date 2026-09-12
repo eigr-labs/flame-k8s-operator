@@ -24,7 +24,7 @@ curl -fsSL https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.
 bash /tmp/install-operator.sh --tag v0.1.0 --namespace flame
 ```
 
-The installer downloads the published manifest bundle, ensures the Erlang cookie secret exists, waits for the CRDs to become established, and applies the operator manifests.
+The installer downloads the published manifest bundle, ensures the Erlang cookie secret exists, waits for the CRDs to become established, applies the operator manifests, and if Argo CD is present it also merges the default FLAME health customizations into `argocd-cm`.
 
 If you need to apply raw YAML directly, use the files published in the GitHub Release assets instead of cloning the repo:
 
@@ -34,6 +34,8 @@ kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/downlo
 kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/flamerunner.crd.yaml
 kubectl apply -f https://github.com/eigr-labs/flame-k8s-operator/releases/download/v0.1.0/deployment.yaml
 ```
+
+For clusters with Argo CD, the release assets also include `argocd-cm-flame-health.yaml` as a separate asset outside the operator Kustomize directory. The installer applies it automatically when `argocd-cm` exists. If you install manually, merge that manifest yourself into the Argo CD namespace.
 
 ### Install the Elixir backend library
 
@@ -181,6 +183,7 @@ See what each annotation means in the following table:
 | flame.org/dist-auto-config           | "true"           | Auto configure RELEASE_DISTRIBUTION and RELEASE_NODE. When set to "false", automatic distribution env injection is disabled for both parent workload and generated runner pods.             |
 | flame.org/otp-app                    |                  | Application release name. Required if dist-auto-config is set to "true".  |
 | flame.org/pool-config-ref            | "default-pool"   | Flame Pool configuration reference name. See more in the Configuration section.           |
+| flame.org/argocd-ignore-runner-healthcheck | "true"    | Adds `argocd.argoproj.io/ignore-healthcheck: "true"` to generated `FlameRunner` resources and their pods by default, so ephemeral runners do not degrade Argo CD application health. Set it to `"false"` if you want Argo CD to evaluate runner health explicitly. |
 | flame.org/runner-termination-timeout | 60000            | Timeout in milliseconds that the Runner will have to finish before the controller sends the POD delete command.
 
 Runner pod node naming is resolved differently from the parent workload mutation:
@@ -288,6 +291,84 @@ Common things to look for:
 - `metadata.name` + `metadata.namespace` to correlate the CRD with the underlying Kubernetes pod
 
 If a runner is stuck, inspect the CRD and then the underlying pod: `kubectl get pod -n <namespace> -l flame.org/runner=<runner-name>` or `kubectl logs <pod-name> -n <namespace>` when the pod exists.
+
+### Argo CD integration
+
+The operator is compatible with Argo CD resource tracking. `FlamePool` resources are a good candidate for explicit health evaluation because they are stable, declarative resources. `FlameRunner` resources are ephemeral, so by default the workload admission flow marks generated runners with `argocd.argoproj.io/ignore-healthcheck: "true"`.
+
+That default keeps transient runner creation and teardown from making an Argo CD application look degraded during normal FLAME activity. The operator installation bundle includes a separate Argo CD customization manifest that the installer merges into `argocd-cm` automatically when Argo CD is present. It is intentionally not part of the operator Kustomize directory, so GitOps installs of the operator do not try to own Argo CD's ConfigMap. You can still override those health scripts later if your environment needs different semantics.
+
+If you want Argo CD to evaluate `FlameRunner` health too, set the workload annotation `flame.org/argocd-ignore-runner-healthcheck: "false"` and keep or customize the provided `FlameRunner` health script.
+
+Example `argocd-cm` customizations:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+data:
+  resource.customizations.health.flame.org_FlamePool: |
+    hs = {}
+    if obj.status == nil then
+      hs.status = "Progressing"
+      hs.message = "Waiting for FlamePool reconciliation"
+      return hs
+    end
+
+    if obj.metadata ~= nil and obj.metadata.generation ~= nil and obj.status.observedGeneration ~= nil and obj.status.observedGeneration < obj.metadata.generation then
+      hs.status = "Progressing"
+      hs.message = "Waiting for controller to observe the latest FlamePool generation"
+      return hs
+    end
+
+    if obj.status.phase == "Ready" then
+      hs.status = "Healthy"
+      hs.message = obj.status.message or "FlamePool is ready"
+      return hs
+    end
+
+    if obj.status.phase == "Invalid" then
+      hs.status = "Degraded"
+      hs.message = obj.status.message or "FlamePool configuration is invalid"
+      return hs
+    end
+
+    hs.status = "Progressing"
+    hs.message = obj.status.message or "Waiting for FlamePool reconciliation"
+    return hs
+
+  resource.customizations.health.flame.org_FlameRunner: |
+    hs = {}
+    if obj.status == nil then
+      hs.status = "Progressing"
+      hs.message = "Waiting for FlameRunner reconciliation"
+      return hs
+    end
+
+    if obj.metadata ~= nil and obj.metadata.generation ~= nil and obj.status.observedGeneration ~= nil and obj.status.observedGeneration < obj.metadata.generation then
+      hs.status = "Progressing"
+      hs.message = "Waiting for controller to observe the latest FlameRunner generation"
+      return hs
+    end
+
+    if obj.status.phase == "Running" or obj.status.phase == "Succeeded" then
+      hs.status = "Healthy"
+      hs.message = obj.status.message or "FlameRunner is healthy"
+      return hs
+    end
+
+    if obj.status.phase == "Failed" then
+      hs.status = "Degraded"
+      hs.message = obj.status.message or "FlameRunner failed"
+      return hs
+    end
+
+    hs.status = "Progressing"
+    hs.message = obj.status.message or "FlameRunner is progressing"
+    return hs
+```
 
 Once this is done, simply add the annotation `flame.org/pool-config-ref` to your Deployment file. Example:
 
