@@ -66,6 +66,9 @@ defmodule Mix.Tasks.Flame.Gen.Manifest do
   @spec render(list(map()), binary()) :: :ok
   defp render(documents, out) do
     if File.dir?(out) do
+      argocd_out = out |> Path.join("..") |> Path.join("argocd") |> Path.expand()
+      File.mkdir_p!(argocd_out)
+
       documents
       |> Ymlr.documents!()
       |> YamlElixir.read_all_from_string!()
@@ -79,6 +82,11 @@ defmodule Mix.Tasks.Flame.Gen.Manifest do
       |> Enum.each(fn {filename, resource} ->
         Mix.Bonny.render(Ymlr.document!(resource), Path.join(out, filename))
       end)
+
+      Mix.Bonny.render(
+        Ymlr.document!(argocd_health_config()),
+        Path.join(argocd_out, "argocd-cm-flame-health.yaml")
+      )
     else
       documents
       |> Ymlr.documents!()
@@ -269,6 +277,77 @@ defmodule Mix.Tasks.Flame.Gen.Manifest do
       - deployment.yaml
       - mutatingwebhookconfiguration.yaml
       - flamepool.yaml
+    """
+  end
+
+  @spec argocd_health_config() :: map()
+  defp argocd_health_config do
+    ~y"""
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: argocd-cm
+      namespace: argocd
+    data:
+      resource.customizations.health.flame.org_FlamePool: |
+        hs = {}
+        if obj.status == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for FlamePool reconciliation"
+          return hs
+        end
+
+        if obj.metadata ~= nil and obj.metadata.generation ~= nil and obj.status.observedGeneration ~= nil and obj.status.observedGeneration < obj.metadata.generation then
+          hs.status = "Progressing"
+          hs.message = "Waiting for controller to observe the latest FlamePool generation"
+          return hs
+        end
+
+        if obj.status.phase == "Ready" then
+          hs.status = "Healthy"
+          hs.message = obj.status.message or "FlamePool is ready"
+          return hs
+        end
+
+        if obj.status.phase == "Invalid" then
+          hs.status = "Degraded"
+          hs.message = obj.status.message or "FlamePool configuration is invalid"
+          return hs
+        end
+
+        hs.status = "Progressing"
+        hs.message = obj.status.message or "Waiting for FlamePool reconciliation"
+        return hs
+
+      resource.customizations.health.flame.org_FlameRunner: |
+        hs = {}
+        if obj.status == nil then
+          hs.status = "Progressing"
+          hs.message = "Waiting for FlameRunner reconciliation"
+          return hs
+        end
+
+        if obj.metadata ~= nil and obj.metadata.generation ~= nil and obj.status.observedGeneration ~= nil and obj.status.observedGeneration < obj.metadata.generation then
+          hs.status = "Progressing"
+          hs.message = "Waiting for controller to observe the latest FlameRunner generation"
+          return hs
+        end
+
+        if obj.status.phase == "Running" or obj.status.phase == "Succeeded" then
+          hs.status = "Healthy"
+          hs.message = obj.status.message or "FlameRunner is healthy"
+          return hs
+        end
+
+        if obj.status.phase == "Failed" then
+          hs.status = "Degraded"
+          hs.message = obj.status.message or "FlameRunner failed"
+          return hs
+        end
+
+        hs.status = "Progressing"
+        hs.message = obj.status.message or "FlameRunner is progressing"
+        return hs
     """
   end
 end
