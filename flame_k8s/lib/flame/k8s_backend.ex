@@ -46,6 +46,15 @@ defmodule FLAME.K8sBackend do
 
   @valid_opts ~w(boot_timeout log)a
   @required_config ~w()a
+  @argocd_tracking_annotation_keys [
+    "argocd.argoproj.io/tracking-id",
+    "argocd.argoproj.io/installation-id"
+  ]
+  @argocd_tracking_label_keys [
+    "app.kubernetes.io/instance",
+    "argocd.argoproj.io/instance"
+  ]
+  @argocd_ignore_healthcheck_annotation "argocd.argoproj.io/ignore-healthcheck"
 
   @impl true
   def init(opts) do
@@ -255,6 +264,35 @@ defmodule FLAME.K8sBackend do
     end
   end
 
+  @doc false
+  def extract_tracking_metadata(resources) when is_list(resources) do
+    Enum.reduce(resources, %{"annotations" => %{}, "labels" => %{}}, fn resource, acc ->
+      metadata = metadata_from_resource(resource)
+
+      %{
+        "annotations" =>
+          Map.merge(
+            Map.get(acc, "annotations", %{}),
+            pick_tracking_entries(Map.get(metadata, "annotations", %{}), @argocd_tracking_annotation_keys)
+          ),
+        "labels" =>
+          Map.merge(
+            Map.get(acc, "labels", %{}),
+            pick_tracking_entries(Map.get(metadata, "labels", %{}), @argocd_tracking_label_keys)
+          )
+      }
+    end)
+  end
+
+  @doc false
+  def runner_annotations(base_annotations, ignore_healthcheck? \\ nil) when is_map(base_annotations) do
+    if ignore_runner_healthcheck?(ignore_healthcheck?) do
+      Map.put(base_annotations, @argocd_ignore_healthcheck_annotation, "true")
+    else
+      base_annotations
+    end
+  end
+
   defp get_k8s_connection do
     case System.get_env("KUBERNETES_SERVICE_HOST") do
       nil ->
@@ -281,23 +319,30 @@ defmodule FLAME.K8sBackend do
     pod_namespace = System.get_env("POD_NAMESPACE") || "default"
     pool_ref = System.get_env("FLAME_POOL_CONFIG_REF") || "default-pool"
     cookie_secret_ref = System.get_env("FLAME_COOKIE_SECRET_REF") || "flame-erlang-cookie"
+    parent_pod = get_parent_pod(state.conn, pod_namespace, pod_name)
+    tracking_metadata = resolve_tracking_metadata(state.conn, pod_namespace, parent_pod)
 
-    parent_uid = get_parent_pod_uid(state.conn, pod_namespace, pod_name)
+    parent_uid = get_in(parent_pod, ["metadata", "uid"])
 
-    image = get_parent_pod_image(state.conn, pod_namespace, pod_name)
+    image = get_in(parent_pod, ["spec", "containers", Access.at(0), "image"]) || "busybox:latest"
 
     runner_name = generate_runner_name(pod_name)
 
     %{
       "apiVersion" => "flame.org/v1",
       "kind" => "FlameRunner",
-      "metadata" => %{
-        "name" => runner_name,
-        "namespace" => pod_namespace,
-        "labels" => %{
-          "flame.org/parent" => pod_name
+      "metadata" =>
+        %{
+          "name" => runner_name,
+          "namespace" => pod_namespace,
+          "labels" =>
+            Map.merge(Map.get(tracking_metadata, "labels", %{}), %{
+              "flame.org/parent" => pod_name
+            })
         }
-      },
+        |> maybe_put_annotations(
+          runner_annotations(Map.get(tracking_metadata, "annotations", %{}))
+        ),
       "spec" => %{
         "parentRef" => %{
           "name" => pod_name,
@@ -312,27 +357,90 @@ defmodule FLAME.K8sBackend do
     }
   end
 
-  defp get_parent_pod_uid(conn, namespace, name) do
+  defp get_parent_pod(conn, namespace, name) do
     case K8s.Client.get("v1", "Pod", namespace: namespace, name: name)
          |> K8s.Client.put_conn(conn)
          |> K8s.Client.run() do
-      {:ok, pod} -> get_in(pod, ["metadata", "uid"])
+      {:ok, pod} -> pod
       _ -> nil
     end
   end
 
-  defp get_parent_pod_image(conn, namespace, name) do
-    case K8s.Client.get("v1", "Pod", namespace: namespace, name: name)
-         |> K8s.Client.put_conn(conn)
-         |> K8s.Client.run() do
-      {:ok, pod} ->
-        # Get first container image
-        get_in(pod, ["spec", "containers", Access.at(0), "image"]) || "busybox:latest"
+  defp resolve_tracking_metadata(_conn, _namespace, nil), do: %{"annotations" => %{}, "labels" => %{}}
 
-      _ ->
-        "busybox:latest"
+  defp resolve_tracking_metadata(conn, namespace, parent_pod) do
+    workload = resolve_parent_workload(conn, namespace, parent_pod)
+    extract_tracking_metadata([parent_pod, workload])
+  end
+
+  defp resolve_parent_workload(_conn, _namespace, nil), do: nil
+
+  defp resolve_parent_workload(conn, namespace, resource) do
+    resource
+    |> owner_references()
+    |> Enum.find_value(fn owner_ref ->
+      resolve_owner_reference(conn, namespace, owner_ref)
+    end)
+  end
+
+  defp resolve_owner_reference(conn, namespace, %{"kind" => "ReplicaSet", "name" => name} = owner_ref) do
+    api_version = Map.get(owner_ref, "apiVersion", "apps/v1")
+
+    case fetch_resource(conn, api_version, "ReplicaSet", namespace, name) do
+      nil -> nil
+      replica_set -> resolve_parent_workload(conn, namespace, replica_set) || replica_set
     end
   end
+
+  defp resolve_owner_reference(conn, namespace, %{"kind" => kind, "name" => name} = owner_ref)
+       when kind in ["Deployment", "StatefulSet"] do
+    api_version = Map.get(owner_ref, "apiVersion", "apps/v1")
+    fetch_resource(conn, api_version, kind, namespace, name)
+  end
+
+  defp resolve_owner_reference(_conn, _namespace, _owner_ref), do: nil
+
+  defp fetch_resource(conn, api_version, kind, namespace, name) do
+    case K8s.Client.get(api_version, kind, namespace: namespace, name: name)
+         |> K8s.Client.put_conn(conn)
+         |> K8s.Client.run() do
+      {:ok, resource} -> resource
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp owner_references(resource) do
+    resource
+    |> metadata_from_resource()
+    |> Map.get("ownerReferences", [])
+    |> List.wrap()
+  end
+
+  defp metadata_from_resource(%{"metadata" => metadata}) when is_map(metadata), do: metadata
+  defp metadata_from_resource(_), do: %{}
+
+  defp pick_tracking_entries(metadata_entries, allowed_keys) when is_map(metadata_entries) do
+    metadata_entries
+    |> Map.take(allowed_keys)
+    |> Enum.reject(fn {_key, value} -> is_nil(value) or value == "" end)
+    |> Map.new()
+  end
+
+  defp pick_tracking_entries(_, _), do: %{}
+
+  defp maybe_put_annotations(metadata, annotations) when annotations == %{}, do: metadata
+  defp maybe_put_annotations(metadata, annotations), do: Map.put(metadata, "annotations", annotations)
+
+  defp ignore_runner_healthcheck?(nil) do
+    System.get_env("FLAME_ARGOCD_IGNORE_RUNNER_HEALTHCHECK", "true") == "true"
+  end
+
+  defp ignore_runner_healthcheck?(value) when is_boolean(value), do: value
+  defp ignore_runner_healthcheck?("true"), do: true
+  defp ignore_runner_healthcheck?("false"), do: false
+  defp ignore_runner_healthcheck?(_), do: true
 
   defp generate_runner_name(parent_name) do
     random_suffix = :crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower)

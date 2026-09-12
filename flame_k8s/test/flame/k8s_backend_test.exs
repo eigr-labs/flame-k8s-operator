@@ -68,6 +68,90 @@ defmodule FLAME.K8sBackendTest do
     end
   end
 
+  describe "extract_tracking_metadata/1" do
+    test "keeps only supported Argo CD tracking keys" do
+      resources = [
+        %{
+          "metadata" => %{
+            "labels" => %{
+              "app.kubernetes.io/instance" => "flame-app",
+              "ignored" => "value"
+            },
+            "annotations" => %{
+              "argocd.argoproj.io/tracking-id" =>
+                "flame-app:apps/Deployment:default/flame-parent-example",
+              "ignored" => "value"
+            }
+          }
+        }
+      ]
+
+      assert %{
+               "labels" => %{"app.kubernetes.io/instance" => "flame-app"},
+               "annotations" => %{
+                 "argocd.argoproj.io/tracking-id" =>
+                   "flame-app:apps/Deployment:default/flame-parent-example"
+               }
+             } = K8sBackend.extract_tracking_metadata(resources)
+    end
+
+    test "later resources override earlier tracking metadata" do
+      resources = [
+        %{
+          "metadata" => %{
+            "labels" => %{"app.kubernetes.io/instance" => "from-pod"},
+            "annotations" => %{
+              "argocd.argoproj.io/tracking-id" => "old-tracking-id"
+            }
+          }
+        },
+        %{
+          "metadata" => %{
+            "labels" => %{
+              "app.kubernetes.io/instance" => "from-workload",
+              "argocd.argoproj.io/instance" => "custom-instance-key"
+            },
+            "annotations" => %{
+              "argocd.argoproj.io/tracking-id" => "new-tracking-id",
+              "argocd.argoproj.io/installation-id" => "cluster-a"
+            }
+          }
+        }
+      ]
+
+      assert %{
+               "labels" => %{
+                 "app.kubernetes.io/instance" => "from-workload",
+                 "argocd.argoproj.io/instance" => "custom-instance-key"
+               },
+               "annotations" => %{
+                 "argocd.argoproj.io/tracking-id" => "new-tracking-id",
+                 "argocd.argoproj.io/installation-id" => "cluster-a"
+               }
+             } = K8sBackend.extract_tracking_metadata(resources)
+    end
+  end
+
+  describe "runner_annotations/2" do
+    test "adds ignore-healthcheck by default" do
+      assert %{
+               "argocd.argoproj.io/ignore-healthcheck" => "true",
+               "argocd.argoproj.io/tracking-id" => "runner-1"
+             } =
+               K8sBackend.runner_annotations(%{
+                 "argocd.argoproj.io/tracking-id" => "runner-1"
+               }, true)
+    end
+
+    test "allows opt-out of ignore-healthcheck" do
+      assert %{"argocd.argoproj.io/tracking-id" => "runner-1"} =
+               K8sBackend.runner_annotations(
+                 %{"argocd.argoproj.io/tracking-id" => "runner-1"},
+                 false
+               )
+    end
+  end
+
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
 end
